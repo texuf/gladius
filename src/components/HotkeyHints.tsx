@@ -18,6 +18,7 @@ export function HotkeyHints() {
   const view = useStore((s) => s.view);
   const focusPane = useStore((s) => s.focusPane);
   const activeTask = useStore((s) => s.activeTask);
+  const addingProject = useStore((s) => s.addingProject);
 
   const [pty, setPty] = useState({ used: 0, max: 0 });
 
@@ -29,7 +30,9 @@ export function HotkeyHints() {
 
   const hints: string[] = [];
 
-  if (view === "projects") {
+  if (view === "projects" && addingProject) {
+    hints.push("Esc Cancel");
+  } else if (view === "projects") {
     hints.push("↑↓ Navigate", "⏎ Select", "Ctrl+N New Project", "d Delete");
   } else if (view === "tasks") {
     hints.push(

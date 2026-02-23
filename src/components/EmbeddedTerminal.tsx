@@ -165,9 +165,8 @@ export function EmbeddedTerminal({ cwd, onExit, onError }: EmbeddedTerminalProps
       if (str.length === 1 && firstByte === 0x1b) {
         escTimerRef.current = setTimeout(() => {
           escTimerRef.current = null;
-          const pid = proc.pid;
+          const shellCwd = getCwd(proc.pid);
           cleanup();
-          const shellCwd = getCwd(pid);
           onExit(shellCwd);
         }, 100);
         return;
