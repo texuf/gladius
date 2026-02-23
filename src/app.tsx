@@ -16,6 +16,7 @@ export function App() {
   const setView = useStore((s) => s.setView);
   const setModal = useStore((s) => s.setModal);
   const activeProject = useStore((s) => s.activeProject);
+  const addingProject = useStore((s) => s.addingProject);
 
   useInput((input, key) => {
     const mod = hasModifier(key);
@@ -26,38 +27,45 @@ export function App() {
       return;
     }
 
-    // Don't process global shortcuts if a modal is open
-    if (modal) return;
+    // Don't process global shortcuts if a modal is open or text input is active
+    if (modal || addingProject) return;
 
-    // Cmd+Shift+0 / Ctrl+Shift+0 — Return to Project Selection
-    // Kitty protocol: Cmd+Shift+0 comes as input=")" with key.super
-    // Standard terminal: Ctrl+0 may come as input="0" with key.ctrl
-    if ((input === ")" || input === "0") && mod) {
+    // Ctrl+O / Cmd+Shift+0 — Return to Project Selection
+    if ((input === "o" && key.ctrl) || (input === ")" && key.super)) {
       setView("projects");
       return;
     }
 
-    // Cmd+Shift+N / Ctrl+Shift+N — Add new project
-    if (input === "N" && mod) {
+    // Cmd+Shift+N — Add new project (Kitty protocol terminals)
+    if (input === "N" && key.super) {
       setView("projects");
       useStore.getState().setAddingProject(true);
       return;
     }
 
-    // Cmd+N / Ctrl+N — Create new task (requires active project)
-    if (input === "n" && mod && activeProject) {
-      setModal({ type: "newTask" });
+    // Ctrl+N — Context-sensitive: add project (project view) or new task (task/taskView)
+    if (input === "n" && mod) {
+      if (view === "projects") {
+        useStore.getState().setAddingProject(true);
+      } else if (activeProject) {
+        setModal({ type: "newTask" });
+      }
       return;
     }
 
     // Cmd+P / Ctrl+P — Return to Task List
-    if (input === "p" && mod && !key.shift && activeProject) {
+    if (input === "p" && mod && activeProject) {
       setView("tasks");
       return;
     }
 
-    // Cmd+Shift+P / Ctrl+Shift+P — Open Task Switcher
-    if (input === "P" && mod) {
+    // "/" — Open Task Switcher (works in any terminal)
+    // Cmd+Shift+P — Open Task Switcher (Kitty protocol)
+    if (input === "/" && !mod) {
+      setModal({ type: "taskSwitcher" });
+      return;
+    }
+    if (input === "P" && key.super) {
       setModal({ type: "taskSwitcher" });
       return;
     }

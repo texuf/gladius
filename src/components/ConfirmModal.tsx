@@ -9,9 +9,9 @@ interface ConfirmModalProps {
 
 export function ConfirmModal({ message, onConfirm, onCancel }: ConfirmModalProps) {
   useInput((input, key) => {
-    if (key.return) {
+    if (input === "y" || input === "Y") {
       onConfirm();
-    } else if (key.escape) {
+    } else if (key.escape || key.return || input === "n" || input === "N") {
       onCancel();
     }
   });
@@ -26,9 +26,10 @@ export function ConfirmModal({ message, onConfirm, onCancel }: ConfirmModalProps
       alignSelf="center"
     >
       <Text>{message}</Text>
-      <Text dimColor>
-        {"\n"}⏎ Confirm  Esc Cancel
-      </Text>
+      <Box marginTop={1}>
+        <Text dimColor>y Confirm  </Text>
+        <Text bold>⏎/n Cancel</Text>
+      </Box>
     </Box>
   );
 }

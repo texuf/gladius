@@ -70,6 +70,12 @@ export function getAllProjects(): Project[] {
 }
 
 export function addProject(path: string): Project {
+  if (!existsSync(path)) {
+    throw new Error(`Directory does not exist: ${path}`);
+  }
+  if (!existsSync(join(path, ".git"))) {
+    throw new Error("Not a git repository");
+  }
   const db = getDb();
   const name = path.replace(homedir(), "~").replace(/^~\//, "");
   const now = new Date().toISOString();

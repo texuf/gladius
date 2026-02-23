@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text, useInput } from "ink";
-import InkTextInput from "ink-text-input";
 import { useStore } from "../store/index.js";
-import { getAllProjects, addProject, touchProject } from "../services/db.js";
+import { getAllProjects, addProject, deleteProject, touchProject } from "../services/db.js";
 import { getTasksForProject } from "../services/db.js";
 import { StatusDots } from "../components/StatusDots.js";
+import { EmbeddedTerminal } from "../components/EmbeddedTerminal.js";
+import { ConfirmModal } from "../components/ConfirmModal.js";
 import type { Project } from "../store/types.js";
 
 export function ProjectSelection() {
@@ -18,9 +19,12 @@ export function ProjectSelection() {
   const setAddingProject = useStore((s) => s.setAddingProject);
   const setTasks = useStore((s) => s.setTasks);
 
-  const [pathInput, setPathInput] = useState("");
   const [error, setError] = useState("");
   const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
+  const [confirmDelete, setConfirmDelete] = useState<Project | null>(null);
+  const [terminalActive, setTerminalActive] = useState(false);
+  const [capturedPath, setCapturedPath] = useState("");
+  const [terminalError, setTerminalError] = useState("");
 
   // Load projects on mount
   useEffect(() => {
@@ -34,13 +38,47 @@ export function ProjectSelection() {
     setTaskCounts(counts);
   }, []);
 
-  useInput((input, key) => {
+  // When addingProject becomes true, open terminal
+  useEffect(() => {
     if (addingProject) {
+      setTerminalActive(true);
+      setCapturedPath("");
+      setError("");
+      setTerminalError("");
+    }
+  }, [addingProject]);
+
+  const handleTerminalExit = (cwd: string) => {
+    setCapturedPath(cwd);
+    setTerminalActive(false);
+  };
+
+  const handleTerminalError = (message: string) => {
+    setTerminalError(message);
+    setTerminalActive(false);
+  };
+
+  useInput((input, key) => {
+    // When terminal is active, it handles its own input via raw stdin
+    if (addingProject && terminalActive) return;
+
+    // Confirmation step or error: captured path shown
+    if (addingProject && !terminalActive) {
       if (key.escape) {
         setAddingProject(false);
-        setPathInput("");
+        setCapturedPath("");
         setError("");
+        setTerminalError("");
+        return;
       }
+      if (!terminalError && key.return) {
+        handleAddProject(capturedPath);
+        return;
+      }
+      return;
+    }
+
+    if (confirmDelete) {
       return;
     }
 
@@ -57,6 +95,11 @@ export function ProjectSelection() {
         setTasks(tasks);
         setView("tasks");
       }
+    } else if (input === "d" && projects.length > 0) {
+      const project = projects[selectedIndex];
+      if (project) {
+        setConfirmDelete(project);
+      }
     }
   });
 
@@ -70,12 +113,40 @@ export function ProjectSelection() {
       const updated = getAllProjects();
       setProjects(updated);
       setAddingProject(false);
-      setPathInput("");
+      setCapturedPath("");
       setError("");
     } catch (e: any) {
       setError(e.message || "Failed to add project");
     }
   };
+
+  const handleConfirmDelete = () => {
+    if (!confirmDelete) return;
+    deleteProject(confirmDelete.id);
+    const updated = getAllProjects();
+    setProjects(updated);
+    setSelectedIndex(Math.min(selectedIndex, updated.length - 1));
+    setConfirmDelete(null);
+  };
+
+  // Render embedded terminal for add-project flow
+  if (addingProject && terminalActive) {
+    return (
+      <Box flexDirection="column" paddingX={1} flexGrow={1}>
+        <Box marginBottom={1}>
+          <Text bold color="cyan">
+            {" "}GLADIUS{" "}
+          </Text>
+          <Text dimColor>  Add Project</Text>
+        </Box>
+        <EmbeddedTerminal
+          cwd={process.env.HOME || "/"}
+          onExit={handleTerminalExit}
+          onError={handleTerminalError}
+        />
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column" paddingX={1} flexGrow={1}>
@@ -87,11 +158,11 @@ export function ProjectSelection() {
 
       <Box justifyContent="space-between" marginBottom={1}>
         <Text bold>Projects</Text>
-        <Text dimColor>Ctrl+Shift+N: New</Text>
+        <Text dimColor>Ctrl+N: New  d: Delete</Text>
       </Box>
 
       {projects.length === 0 && !addingProject && (
-        <Text dimColor>No projects added. Press Ctrl+Shift+N to add one.</Text>
+        <Text dimColor>No projects added. Press Ctrl+N to add one.</Text>
       )}
 
       {projects.map((project, i) => (
@@ -110,19 +181,36 @@ export function ProjectSelection() {
         </Box>
       ))}
 
-      {addingProject && (
+      {confirmDelete && (
+        <ConfirmModal
+          message={`Delete project "${confirmDelete.name}"?`}
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+
+      {addingProject && !terminalActive && terminalError && (
+        <Box flexDirection="column" marginTop={1} borderStyle="single" borderColor="red" paddingX={1} paddingY={1}>
+          <Text bold color="red">Terminal Error</Text>
+          <Box marginTop={1}>
+            <Text color="red">{terminalError}</Text>
+          </Box>
+          <Box marginTop={1}>
+            <Text dimColor>Try closing unused terminal tabs to free PTY devices.</Text>
+          </Box>
+          <Box marginTop={1}>
+            <Text dimColor>Esc Cancel</Text>
+          </Box>
+        </Box>
+      )}
+
+      {addingProject && !terminalActive && !terminalError && (
         <Box flexDirection="column" marginTop={1} borderStyle="single" borderColor="cyan" paddingX={1} paddingY={1}>
           <Text bold color="cyan">
-            Add Project Directory:
+            Add project at:
           </Text>
           <Box marginTop={1}>
-            <Text>&gt; </Text>
-            <InkTextInput
-              value={pathInput}
-              onChange={setPathInput}
-              onSubmit={handleAddProject}
-              placeholder="/path/to/project"
-            />
+            <Text>{capturedPath}</Text>
           </Box>
           {error && (
             <Box marginTop={1}>

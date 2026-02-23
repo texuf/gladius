@@ -8,11 +8,12 @@
     "dev": "bun --watch run src/index.tsx"
   },
   "dependencies": {
+    "@xterm/headless": "^6.0.0",
     "ink": "^6.0.0",
     "ink-text-input": "^6.0.0",
     "react": "^19.0.0",
-    "zustand": "^5.0.0",
-    "uuid": "^11.0.0"
+    "uuid": "^11.0.0",
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
