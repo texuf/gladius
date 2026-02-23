@@ -118,7 +118,7 @@ export function EmbeddedTerminal({ cwd, onExit, onError }: EmbeddedTerminalProps
   const [lines, setLines] = useState<string[]>([]);
   const procRef = useRef<ReturnType<typeof Bun.spawn> | null>(null);
   const xtermRef = useRef<Terminal | null>(null);
-  const stdinListenerRef = useRef<((data: Buffer) => void) | null>(null);
+  const stdinListenerRef = useRef<((data: Buffer | string) => void) | null>(null);
   const renderIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cleanedUpRef = useRef(false);
@@ -155,11 +155,14 @@ export function EmbeddedTerminal({ cwd, onExit, onError }: EmbeddedTerminalProps
     procRef.current = proc;
 
     // Raw stdin → PTY with Esc detection
-    const onStdinData = (data: Buffer) => {
+    const onStdinData = (data: Buffer | string) => {
       if (cleanedUpRef.current) return;
 
+      const str = typeof data === "string" ? data : data.toString();
+      const firstByte = typeof data === "string" ? data.charCodeAt(0) : data[0];
+
       // Check for bare Esc: single \x1b byte
-      if (data.length === 1 && data[0] === 0x1b) {
+      if (str.length === 1 && firstByte === 0x1b) {
         escTimerRef.current = setTimeout(() => {
           escTimerRef.current = null;
           const pid = proc.pid;
@@ -175,14 +178,14 @@ export function EmbeddedTerminal({ cwd, onExit, onError }: EmbeddedTerminalProps
         clearTimeout(escTimerRef.current);
         escTimerRef.current = null;
         try {
-          proc.terminal!.write("\x1b" + data.toString());
+          proc.terminal!.write("\x1b" + str);
         } catch {}
         return;
       }
 
       // Normal data — forward to PTY
       try {
-        proc.terminal!.write(data.toString());
+        proc.terminal!.write(str);
       } catch {}
     };
 
