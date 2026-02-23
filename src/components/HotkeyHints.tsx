@@ -1,11 +1,31 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Box, Text } from "ink";
+import { readdirSync } from "fs";
 import { useStore } from "../store/index.js";
+
+function getPtyCount(): { used: number; max: number } {
+  try {
+    const used = readdirSync("/dev").filter((f) => f.startsWith("ttys")).length;
+    const { execSync } = require("child_process");
+    const max = parseInt(execSync("sysctl -n kern.tty.ptmx_max", { encoding: "utf-8" }).trim(), 10) || 511;
+    return { used, max };
+  } catch {
+    return { used: 0, max: 0 };
+  }
+}
 
 export function HotkeyHints() {
   const view = useStore((s) => s.view);
   const focusPane = useStore((s) => s.focusPane);
   const activeTask = useStore((s) => s.activeTask);
+
+  const [pty, setPty] = useState({ used: 0, max: 0 });
+
+  useEffect(() => {
+    setPty(getPtyCount());
+    const interval = setInterval(() => setPty(getPtyCount()), 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const hints: string[] = [];
 
@@ -39,8 +59,9 @@ export function HotkeyHints() {
   }
 
   return (
-    <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
+    <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1} justifyContent="space-between">
       <Text dimColor>{hints.join("  ")}</Text>
+      {pty.max > 0 && <Text dimColor>PTY {pty.used}/{pty.max}</Text>}
     </Box>
   );
 }
