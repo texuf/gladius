@@ -6,6 +6,5 @@ import { App } from "./app.js";
 process.stdin.resume();
 
 render(<App />, {
-  // Enable Kitty keyboard protocol for Cmd+key detection
-  // Requires Ghostty, Kitty, WezTerm, or iTerm2
+  fullScreen: true,
 });
