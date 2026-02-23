@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { Box, Text, useInput, useApp } from "ink";
 import { useStore } from "./store/index.js";
+import { getAppState, getProjectById, getTasksForProject } from "./services/db.js";
 import { ProjectSelection } from "./views/ProjectSelection.js";
 import { TaskList } from "./views/TaskList.js";
 import { TaskView } from "./views/TaskView.js";
@@ -17,6 +18,36 @@ export function App() {
   const setModal = useStore((s) => s.setModal);
   const activeProject = useStore((s) => s.activeProject);
   const addingProject = useStore((s) => s.addingProject);
+
+  // Restore navigation breadcrumb on startup
+  useEffect(() => {
+    const savedView = getAppState("nav.view");
+    const savedProjectId = getAppState("nav.project_id");
+    const savedTaskId = getAppState("nav.task_id");
+
+    if (!savedProjectId) {
+      if (savedView) useStore.getState().setView(savedView as any);
+      return;
+    }
+
+    const project = getProjectById(savedProjectId);
+    if (!project) return; // deleted project — stay on projects view
+
+    useStore.getState().setActiveProject(project);
+    const tasks = getTasksForProject(project.id);
+    useStore.getState().setTasks(tasks);
+
+    if (savedTaskId) {
+      const task = tasks.find((t) => t.id === savedTaskId && t.status === "active");
+      if (task) {
+        useStore.getState().setActiveTask(task);
+        useStore.getState().setView("taskView");
+        return;
+      }
+    }
+
+    useStore.getState().setView("tasks");
+  }, []);
 
   useInput((input, key) => {
     const mod = hasModifier(key);

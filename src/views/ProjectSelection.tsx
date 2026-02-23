@@ -4,7 +4,7 @@ import { useStore } from "../store/index.js";
 import { getAllProjects, addProject, deleteProject, touchProject } from "../services/db.js";
 import { getTasksForProject } from "../services/db.js";
 import { StatusDots } from "../components/StatusDots.js";
-import { EmbeddedTerminal } from "../components/EmbeddedTerminal.js";
+import { EmbeddedTerminal, getCwd } from "../components/EmbeddedTerminal.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import type { Project } from "../store/types.js";
 
@@ -48,9 +48,10 @@ export function ProjectSelection() {
     }
   }, [addingProject]);
 
-  const handleTerminalExit = (cwd: string) => {
-    setCapturedPath(cwd);
-    setTerminalActive(false);
+  const handleTerminalEsc = (pid: number) => {
+    const shellCwd = getCwd(pid);
+    setCapturedPath(shellCwd);
+    setTerminalActive(false);  // unmounts EmbeddedTerminal → PTY killed
   };
 
   const handleTerminalError = (message: string) => {
@@ -141,7 +142,7 @@ export function ProjectSelection() {
         </Box>
         <EmbeddedTerminal
           cwd={process.env.HOME || "/"}
-          onExit={handleTerminalExit}
+          onEsc={handleTerminalEsc}
           onError={handleTerminalError}
         />
       </Box>

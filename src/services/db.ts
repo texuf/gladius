@@ -57,7 +57,29 @@ function initSchema() {
       metadata TEXT,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS app_state (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
   `);
+}
+
+// ── App State (key-value) ──
+
+export function getAppState(key: string): string | null {
+  const db = getDb();
+  const row = db.query("SELECT value FROM app_state WHERE key = ?").get(key) as { value: string } | null;
+  return row ? row.value : null;
+}
+
+export function setAppState(key: string, value: string | null): void {
+  const db = getDb();
+  if (value === null) {
+    db.query("DELETE FROM app_state WHERE key = ?").run(key);
+  } else {
+    db.query("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)").run(key, value);
+  }
 }
 
 // ── Project CRUD ──
@@ -100,6 +122,11 @@ export function touchProject(id: string) {
     new Date().toISOString(),
     id
   );
+}
+
+export function getProjectById(id: string): Project | null {
+  const db = getDb();
+  return (db.query("SELECT * FROM projects WHERE id = ?").get(id) as Project) ?? null;
 }
 
 export function deleteProject(id: string) {

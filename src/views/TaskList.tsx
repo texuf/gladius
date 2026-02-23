@@ -7,6 +7,7 @@ import {
   swapTaskOrder,
   touchTask,
   createTask as dbCreateTask,
+  reopenTask as dbReopenTask,
 } from "../services/db.js";
 import { getGitStatus, formatGitStatus } from "../services/git.js";
 import { generateLabel, deduplicateLabel } from "../utils/label.js";
@@ -34,6 +35,10 @@ export function TaskList() {
   const [creating, setCreating] = useState(false);
 
   const activeTasks = tasks.filter((t) => t.status === "active");
+  const closedTasks = tasks
+    .filter((t) => t.status === "closed")
+    .sort((a, b) => (b.last_accessed_at || "").localeCompare(a.last_accessed_at || ""));
+  const allTasks = [...activeTasks, ...closedTasks];
 
   // Load git statuses
   useEffect(() => {
@@ -50,39 +55,41 @@ export function TaskList() {
   useInput((input, key) => {
     if (modal || creating) return;
 
+    const selectedTask = allTasks[selectedIndex];
+
     if (key.upArrow && !key.shift) {
       setSelectedIndex(Math.max(0, selectedIndex - 1));
     } else if (key.downArrow && !key.shift) {
-      setSelectedIndex(Math.min(activeTasks.length - 1, selectedIndex + 1));
+      setSelectedIndex(Math.min(allTasks.length - 1, selectedIndex + 1));
     } else if (key.upArrow && key.shift) {
-      // Reorder: swap with previous
-      if (selectedIndex > 0 && activeTasks[selectedIndex] && activeTasks[selectedIndex - 1]) {
+      // Reorder: swap with previous (active tasks only)
+      if (selectedIndex > 0 && selectedTask?.status === "active" && activeTasks[selectedIndex - 1]) {
         swapTaskOrder(activeTasks[selectedIndex].id, activeTasks[selectedIndex - 1].id);
         reloadTasks();
         setSelectedIndex(selectedIndex - 1);
       }
     } else if (key.downArrow && key.shift) {
-      // Reorder: swap with next
+      // Reorder: swap with next (active tasks only)
       if (
         selectedIndex < activeTasks.length - 1 &&
-        activeTasks[selectedIndex] &&
+        selectedTask?.status === "active" &&
         activeTasks[selectedIndex + 1]
       ) {
         swapTaskOrder(activeTasks[selectedIndex].id, activeTasks[selectedIndex + 1].id);
         reloadTasks();
         setSelectedIndex(selectedIndex + 1);
       }
-    } else if (key.return && activeTasks[selectedIndex]) {
-      const task = activeTasks[selectedIndex];
-      touchTask(task.id);
-      setActiveTask(task);
+    } else if (key.return && selectedTask?.status === "active") {
+      touchTask(selectedTask.id);
+      setActiveTask(selectedTask);
       setView("taskView");
-    } else if (input === "x" && activeTasks[selectedIndex]) {
-      const task = activeTasks[selectedIndex];
+    } else if (key.return && selectedTask?.status === "closed") {
+      handleReopenTask(selectedTask);
+    } else if (input === "x" && selectedTask?.status === "active") {
       setModal({
         type: "confirm",
-        message: `Close task '${task.label}'? This will delete the worktree.`,
-        onConfirm: () => handleCloseTask(task),
+        message: `Close task '${selectedTask.label}'? This will delete the worktree.`,
+        onConfirm: () => handleCloseTask(selectedTask),
       });
     }
   });
@@ -102,8 +109,22 @@ export function TaskList() {
     dbCloseTask(task.id);
     reloadTasks();
     setModal(null);
-    if (selectedIndex >= activeTasks.length - 1) {
-      setSelectedIndex(Math.max(0, selectedIndex - 1));
+  };
+
+  const handleReopenTask = async (task: Task) => {
+    if (!activeProject) return;
+    setCreating(true);
+    try {
+      const worktreePath = await createWorktree(activeProject.path, task.label);
+      dbReopenTask(task.id, worktreePath);
+      reloadTasks();
+      const reopened = { ...task, status: "active" as const, worktree_path: worktreePath, closed_at: null };
+      setActiveTask(reopened);
+      setView("taskView");
+    } catch (e: any) {
+      console.error("Failed to reopen task:", e.message);
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -156,18 +177,24 @@ export function TaskList() {
         <Text dimColor>Ctrl+N: New</Text>
       </Box>
 
-      {activeTasks.length === 0 && (
+      {allTasks.length === 0 && (
         <Text dimColor>No tasks. Press Ctrl+N to create one.</Text>
       )}
 
-      {activeTasks.map((task, i) => {
+      {allTasks.map((task, i) => {
         const isSelected = i === selectedIndex;
+        const isClosed = task.status === "closed";
         const status = gitStatuses[task.id];
         return (
           <Box key={task.id} flexDirection="column" paddingLeft={1} marginBottom={1}>
             <Box>
-              <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>
+              <Text
+                color={isSelected ? "cyan" : undefined}
+                bold={isSelected}
+                dimColor={isClosed && !isSelected}
+              >
                 {isSelected ? "▸ " : "  "}
+                {isClosed ? "[closed] " : ""}
                 {task.label}
               </Text>
             </Box>
@@ -178,7 +205,7 @@ export function TaskList() {
                   : task.description}&quot;
               </Text>
             </Box>
-            {status && (
+            {status && !isClosed && (
               <Box paddingLeft={4}>
                 <Text dimColor>{formatGitStatus(status)}</Text>
               </Box>

@@ -5,8 +5,11 @@ import { execSync } from "child_process";
 
 interface EmbeddedTerminalProps {
   cwd: string;
-  onExit: (cwd: string) => void;
-  onError: (message: string) => void;
+  focused?: boolean;
+  rows?: number;
+  cols?: number;
+  onEsc?: (pid: number) => void;
+  onError?: (message: string) => void;
 }
 
 // Convert xterm buffer cell attributes to ANSI SGR escape sequences
@@ -73,8 +76,9 @@ function cellToAnsi(
 function bufferToAnsiLines(term: Terminal): string[] {
   const lines: string[] = [];
   const buffer = term.buffer.active;
+  const baseY = buffer.baseY;
 
-  for (let y = 0; y < term.rows; y++) {
+  for (let y = baseY; y < baseY + term.rows; y++) {
     const line = buffer.getLine(y);
     if (!line) { lines.push(""); continue; }
 
@@ -98,7 +102,7 @@ function bufferToAnsiLines(term: Terminal): string[] {
   return lines;
 }
 
-function getCwd(pid: number): string {
+export function getCwd(pid: number): string {
   try {
     const result = execSync(`lsof -a -p ${pid} -d cwd -Fn`, {
       encoding: "utf-8",
@@ -111,10 +115,10 @@ function getCwd(pid: number): string {
   }
 }
 
-const CHROME_ROWS = 7;
-const CHROME_COLS = 4;
+const DEFAULT_CHROME_ROWS = 7;
+const DEFAULT_CHROME_COLS = 4;
 
-export function EmbeddedTerminal({ cwd, onExit, onError }: EmbeddedTerminalProps) {
+export function EmbeddedTerminal({ cwd, focused = true, rows: propRows, cols: propCols, onEsc, onError }: EmbeddedTerminalProps) {
   const [lines, setLines] = useState<string[]>([]);
   const procRef = useRef<ReturnType<typeof Bun.spawn> | null>(null);
   const xtermRef = useRef<Terminal | null>(null);
@@ -122,10 +126,17 @@ export function EmbeddedTerminal({ cwd, onExit, onError }: EmbeddedTerminalProps
   const renderIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cleanedUpRef = useRef(false);
+  const focusedRef = useRef(focused);
 
+  // Keep focusedRef in sync
   useEffect(() => {
-    const cols = Math.max(40, (process.stdout.columns || 80) - CHROME_COLS);
-    const rows = Math.max(10, (process.stdout.rows || 24) - CHROME_ROWS);
+    focusedRef.current = focused;
+  }, [focused]);
+
+  // Spawn PTY and render loop on mount, kill on unmount
+  useEffect(() => {
+    const cols = propCols ?? Math.max(40, (process.stdout.columns || 80) - DEFAULT_CHROME_COLS);
+    const rows = propRows ?? Math.max(10, (process.stdout.rows || 24) - DEFAULT_CHROME_ROWS);
 
     // Create xterm headless terminal
     const xterm = new Terminal({ cols, rows, allowProposedApi: true });
@@ -149,7 +160,7 @@ export function EmbeddedTerminal({ cwd, onExit, onError }: EmbeddedTerminalProps
         },
       });
     } catch (e: any) {
-      onError(`Failed to open terminal: ${e.message || e}`);
+      onError?.(`Failed to open terminal: ${e.message || e}`);
       return;
     }
     procRef.current = proc;
@@ -157,6 +168,7 @@ export function EmbeddedTerminal({ cwd, onExit, onError }: EmbeddedTerminalProps
     // Raw stdin → PTY with Esc detection
     const onStdinData = (data: Buffer | string) => {
       if (cleanedUpRef.current) return;
+      if (!focusedRef.current) return;
 
       const str = typeof data === "string" ? data : data.toString();
       const firstByte = typeof data === "string" ? data.charCodeAt(0) : data[0];
@@ -165,9 +177,7 @@ export function EmbeddedTerminal({ cwd, onExit, onError }: EmbeddedTerminalProps
       if (str.length === 1 && firstByte === 0x1b) {
         escTimerRef.current = setTimeout(() => {
           escTimerRef.current = null;
-          const shellCwd = getCwd(proc.pid);
-          cleanup();
-          onExit(shellCwd);
+          onEsc?.(proc.pid);
         }, 100);
         return;
       }
@@ -198,11 +208,12 @@ export function EmbeddedTerminal({ cwd, onExit, onError }: EmbeddedTerminalProps
       setLines(rendered);
     }, 33);
 
-    // Handle resize
+    // Handle resize (only auto-resize when no explicit size given)
     const onResize = () => {
       if (cleanedUpRef.current) return;
-      const newCols = Math.max(40, (process.stdout.columns || 80) - CHROME_COLS);
-      const newRows = Math.max(10, (process.stdout.rows || 24) - CHROME_ROWS);
+      if (propRows || propCols) return;
+      const newCols = Math.max(40, (process.stdout.columns || 80) - DEFAULT_CHROME_COLS);
+      const newRows = Math.max(10, (process.stdout.rows || 24) - DEFAULT_CHROME_ROWS);
       try {
         proc.terminal!.resize(newCols, newRows);
         xterm.resize(newCols, newRows);
@@ -240,16 +251,10 @@ export function EmbeddedTerminal({ cwd, onExit, onError }: EmbeddedTerminalProps
   }, []);
 
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="cyan" flexGrow={1}>
-      <Box paddingX={1}>
-        <Text bold color="cyan">Terminal</Text>
-        <Text dimColor>  (navigate to project dir, then press Esc)</Text>
-      </Box>
-      <Box flexDirection="column" paddingX={1}>
-        {lines.map((line, i) => (
-          <Text key={i}>{line}</Text>
-        ))}
-      </Box>
+    <Box flexDirection="column" flexGrow={1}>
+      {lines.map((line, i) => (
+        <Text key={i}>{line}</Text>
+      ))}
     </Box>
   );
 }

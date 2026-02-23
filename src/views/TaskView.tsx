@@ -6,7 +6,7 @@ import { TerminalPane } from "../components/TerminalPane.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { processChord } from "../utils/keyboard.js";
 import { formatGitStatus, getGitStatus } from "../services/git.js";
-import { closeTask as dbCloseTask, updateTask } from "../services/db.js";
+import { closeTask as dbCloseTask, updateTask, getTasksForProject } from "../services/db.js";
 import { deleteWorktree } from "../services/worktree.js";
 
 export function TaskView() {
@@ -70,7 +70,7 @@ export function TaskView() {
     }
 
     // Close task
-    if (input === "x" && !key.super && activeTask) {
+    if ((input === "d" || input === "x") && !key.super && activeTask) {
       setModal({
         type: "confirm",
         message: `Close task '${activeTask.label}'? This will delete the worktree.`,
@@ -95,12 +95,15 @@ export function TaskView() {
     }
   });
 
+  const setTasks = useStore((s) => s.setTasks);
+
   const handleCloseTask = async () => {
     if (!activeTask || !activeProject) return;
     if (activeTask.worktree_path) {
       await deleteWorktree(activeProject.path, activeTask.worktree_path);
     }
     dbCloseTask(activeTask.id);
+    setTasks(getTasksForProject(activeProject.id));
     setActiveTask(null);
     setModal(null);
     setView("tasks");

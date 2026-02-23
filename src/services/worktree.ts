@@ -1,7 +1,8 @@
 import { $ } from "bun";
-import { join } from "path";
+import { join, basename } from "path";
+import { homedir } from "os";
 import { existsSync, mkdirSync, copyFileSync, readdirSync, statSync } from "fs";
-import { BRANCH_PREFIX, WORKTREE_DIR } from "../utils/constants.js";
+import { BRANCH_PREFIX } from "../utils/constants.js";
 
 /**
  * Create a git worktree for a task.
@@ -14,7 +15,8 @@ export async function createWorktree(
   label: string
 ): Promise<string> {
   const branchName = `${BRANCH_PREFIX}/${label}`;
-  const worktreeDir = join(projectPath, WORKTREE_DIR);
+  const projectName = basename(projectPath);
+  const worktreeDir = join(homedir(), ".gladius", "worktrees", projectName);
   const worktreePath = join(worktreeDir, label);
 
   // Ensure worktree directory exists
@@ -22,8 +24,13 @@ export async function createWorktree(
     mkdirSync(worktreeDir, { recursive: true });
   }
 
-  // Create worktree with new branch
-  await $`git -C ${projectPath} worktree add ${worktreePath} -b ${branchName}`;
+  // Create worktree — reuse existing branch or create new one
+  const branchExists = await $`git -C ${projectPath} rev-parse --verify ${branchName}`.quiet().then(() => true, () => false);
+  if (branchExists) {
+    await $`git -C ${projectPath} worktree add ${worktreePath} ${branchName}`;
+  } else {
+    await $`git -C ${projectPath} worktree add ${worktreePath} -b ${branchName}`;
+  }
 
   // Copy .env files
   copyEnvFiles(projectPath, worktreePath);

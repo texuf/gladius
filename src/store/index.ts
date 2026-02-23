@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { setAppState } from "../services/db.js";
 import type { AppState } from "./types.js";
 
 export const useStore = create<AppState>((set) => ({
@@ -24,9 +25,18 @@ export const useStore = create<AppState>((set) => ({
   gitStatuses: {},
 
   // Actions
-  setView: (view) => set({ view, selectedIndex: 0 }),
-  setActiveProject: (activeProject) => set({ activeProject }),
-  setActiveTask: (activeTask) => set({ activeTask, focusPane: "none", chordBuffer: "" }),
+  setView: (view) => {
+    setAppState("nav.view", view);
+    set({ view, selectedIndex: 0 });
+  },
+  setActiveProject: (activeProject) => {
+    setAppState("nav.project_id", activeProject?.id ?? null);
+    set({ activeProject });
+  },
+  setActiveTask: (activeTask) => {
+    setAppState("nav.task_id", activeTask?.id ?? null);
+    set({ activeTask, focusPane: "none", chordBuffer: "" });
+  },
   setSelectedIndex: (selectedIndex) => set({ selectedIndex }),
   setModal: (modal) => set({ modal }),
   setFocusPane: (focusPane) => set({ focusPane }),
