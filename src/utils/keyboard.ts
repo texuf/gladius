@@ -1,19 +1,27 @@
 import type { Key } from "ink";
 
 /**
- * Check if a Cmd+key combo was pressed.
- * Uses key.super from Kitty keyboard protocol.
+ * Check if a Cmd+key or Ctrl+key combo was pressed.
+ * Supports both Kitty protocol (key.super) and standard terminals (key.ctrl).
  */
-export function isCmdKey(input: string, key: Key, char: string): boolean {
-  return key.super === true && input === char;
+export function isModKey(input: string, key: Key, char: string): boolean {
+  return (key.super === true || key.ctrl === true) && input === char;
 }
 
 /**
- * Check if Cmd+Shift+key was pressed.
+ * Check if Cmd+Shift+key or Ctrl+Shift+key was pressed.
  * Kitty protocol sends uppercase char with key.super for Cmd+Shift combos.
+ * Standard terminals: Ctrl+Shift+key may send uppercase with key.ctrl.
  */
-export function isCmdShiftKey(input: string, key: Key, char: string): boolean {
-  return key.super === true && input === char.toUpperCase();
+export function isModShiftKey(input: string, key: Key, char: string): boolean {
+  return (key.super === true || key.ctrl === true) && input === char.toUpperCase();
+}
+
+/**
+ * Check if either Cmd or Ctrl modifier is active.
+ */
+export function hasModifier(key: Key): boolean {
+  return key.super === true || key.ctrl === true;
 }
 
 /**

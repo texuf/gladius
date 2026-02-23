@@ -153,11 +153,11 @@ export function TaskList() {
 
       <Box justifyContent="space-between" marginBottom={1}>
         <Text bold>Tasks</Text>
-        <Text dimColor>Cmd+N: New</Text>
+        <Text dimColor>Ctrl+N: New</Text>
       </Box>
 
       {activeTasks.length === 0 && (
-        <Text dimColor>No tasks. Press Cmd+N to create one.</Text>
+        <Text dimColor>No tasks. Press Ctrl+N to create one.</Text>
       )}
 
       {activeTasks.map((task, i) => {

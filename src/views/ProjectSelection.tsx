@@ -87,11 +87,11 @@ export function ProjectSelection() {
 
       <Box justifyContent="space-between" marginBottom={1}>
         <Text bold>Projects</Text>
-        <Text dimColor>Cmd+Shift+N: New</Text>
+        <Text dimColor>Ctrl+Shift+N: New</Text>
       </Box>
 
       {projects.length === 0 && !addingProject && (
-        <Text dimColor>No projects added. Press Cmd+Shift+N to add one.</Text>
+        <Text dimColor>No projects added. Press Ctrl+Shift+N to add one.</Text>
       )}
 
       {projects.map((project, i) => (
