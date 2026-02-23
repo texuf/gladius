@@ -2,8 +2,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { Box, Text } from "ink";
 import { Terminal } from "@xterm/headless";
 import { execSync } from "child_process";
+import { getOrCreateSession } from "../services/terminalManager.js";
 
 interface EmbeddedTerminalProps {
+  taskId: string;
   cwd: string;
   focused?: boolean;
   rows?: number;
@@ -118,14 +120,11 @@ export function getCwd(pid: number): string {
 const DEFAULT_CHROME_ROWS = 7;
 const DEFAULT_CHROME_COLS = 4;
 
-export function EmbeddedTerminal({ cwd, focused = true, rows: propRows, cols: propCols, onEsc, onError }: EmbeddedTerminalProps) {
+export function EmbeddedTerminal({ taskId, cwd, focused = true, rows: propRows, cols: propCols, onEsc, onError }: EmbeddedTerminalProps) {
   const [lines, setLines] = useState<string[]>([]);
-  const procRef = useRef<ReturnType<typeof Bun.spawn> | null>(null);
-  const xtermRef = useRef<Terminal | null>(null);
   const stdinListenerRef = useRef<((data: Buffer | string) => void) | null>(null);
   const renderIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cleanedUpRef = useRef(false);
   const focusedRef = useRef(focused);
 
   // Keep focusedRef in sync
@@ -133,41 +132,36 @@ export function EmbeddedTerminal({ cwd, focused = true, rows: propRows, cols: pr
     focusedRef.current = focused;
   }, [focused]);
 
-  // Spawn PTY and render loop on mount, kill on unmount
+  // Attach to (or create) persistent session; detach on unmount
   useEffect(() => {
     const cols = propCols ?? Math.max(40, (process.stdout.columns || 80) - DEFAULT_CHROME_COLS);
     const rows = propRows ?? Math.max(10, (process.stdout.rows || 24) - DEFAULT_CHROME_ROWS);
 
-    // Create xterm headless terminal
-    const xterm = new Terminal({ cols, rows, allowProposedApi: true });
-    xtermRef.current = xterm;
-
-    const shell = process.env.SHELL || "/bin/zsh";
-
-    let proc: ReturnType<typeof Bun.spawn>;
+    let session;
     try {
-      proc = Bun.spawn([shell, "-l"], {
-        cwd,
-        env: process.env as Record<string, string>,
-        terminal: {
-          cols,
-          rows,
-          name: "xterm-256color",
-          data(_terminal: any, data: Buffer) {
-            // PTY output → xterm
-            xterm.write(new Uint8Array(data));
-          },
-        },
-      });
+      session = getOrCreateSession(taskId, cwd, cols, rows);
     } catch (e: any) {
       onError?.(`Failed to open terminal: ${e.message || e}`);
       return;
     }
-    procRef.current = proc;
+
+    const { proc, xterm } = session;
+
+    // Resize to match current dimensions if they changed
+    if (session.cols !== cols || session.rows !== rows) {
+      try {
+        proc.terminal!.resize(cols, rows);
+        xterm.resize(cols, rows);
+        session.cols = cols;
+        session.rows = rows;
+      } catch {}
+    }
+
+    // Render immediately from existing buffer
+    setLines(bufferToAnsiLines(xterm));
 
     // Raw stdin → PTY with Esc detection
     const onStdinData = (data: Buffer | string) => {
-      if (cleanedUpRef.current) return;
       if (!focusedRef.current) return;
 
       const str = typeof data === "string" ? data : data.toString();
@@ -204,27 +198,25 @@ export function EmbeddedTerminal({ cwd, focused = true, rows: propRows, cols: pr
 
     // Render loop at ~30fps
     renderIntervalRef.current = setInterval(() => {
-      const rendered = bufferToAnsiLines(xterm);
-      setLines(rendered);
+      setLines(bufferToAnsiLines(xterm));
     }, 33);
 
-    // Handle resize (only auto-resize when no explicit size given)
+    // Handle resize
     const onResize = () => {
-      if (cleanedUpRef.current) return;
       if (propRows || propCols) return;
       const newCols = Math.max(40, (process.stdout.columns || 80) - DEFAULT_CHROME_COLS);
       const newRows = Math.max(10, (process.stdout.rows || 24) - DEFAULT_CHROME_ROWS);
       try {
         proc.terminal!.resize(newCols, newRows);
         xterm.resize(newCols, newRows);
+        session!.cols = newCols;
+        session!.rows = newRows;
       } catch {}
     };
     process.stdout.on("resize", onResize);
 
-    const cleanup = () => {
-      if (cleanedUpRef.current) return;
-      cleanedUpRef.current = true;
-
+    // Cleanup: detach listeners only — session stays alive
+    return () => {
       if (escTimerRef.current) {
         clearTimeout(escTimerRef.current);
         escTimerRef.current = null;
@@ -238,17 +230,8 @@ export function EmbeddedTerminal({ cwd, focused = true, rows: propRows, cols: pr
         stdinListenerRef.current = null;
       }
       process.stdout.removeListener("resize", onResize);
-      try {
-        proc.terminal!.close();
-      } catch {}
-      try {
-        proc.kill();
-      } catch {}
-      xterm.dispose();
     };
-
-    return cleanup;
-  }, []);
+  }, [taskId]);
 
   return (
     <Box flexDirection="column" flexGrow={1}>

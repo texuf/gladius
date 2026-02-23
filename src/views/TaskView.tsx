@@ -8,6 +8,7 @@ import { processChord } from "../utils/keyboard.js";
 import { formatGitStatus, getGitStatus } from "../services/git.js";
 import { closeTask as dbCloseTask, updateTask, getTasksForProject } from "../services/db.js";
 import { deleteWorktree } from "../services/worktree.js";
+import { destroySession } from "../services/terminalManager.js";
 
 export function TaskView() {
   const activeTask = useStore((s) => s.activeTask);
@@ -99,6 +100,8 @@ export function TaskView() {
 
   const handleCloseTask = async () => {
     if (!activeTask || !activeProject) return;
+    destroySession(`${activeTask.id}-terminal`);
+    destroySession(`${activeTask.id}-console`);
     if (activeTask.worktree_path) {
       await deleteWorktree(activeProject.path, activeTask.worktree_path);
     }

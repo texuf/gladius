@@ -62,6 +62,7 @@ export function TerminalPane({ type, label, focusKey }: TerminalPaneProps) {
 
       {hasWorktree && !termError ? (
         <EmbeddedTerminal
+          taskId={`${activeTask.id}-${type}`}
           cwd={activeTask.worktree_path!}
           focused={isFocused}
           rows={dims!.ptyRows}

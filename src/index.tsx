@@ -1,6 +1,7 @@
 import { render } from "ink";
 import React from "react";
 import { App } from "./app.js";
+import { destroyAllSessions } from "./services/terminalManager.js";
 
 // Bun workaround: ensure stdin is flowing for Ink to receive input
 process.stdin.resume();
@@ -16,6 +17,7 @@ const { waitUntilExit, unmount } = render(<App />);
 
 // Restore terminal on exit
 function cleanup() {
+  destroyAllSessions();
   // Show cursor
   process.stdout.write("\x1b[?25h");
   // Leave alternate screen buffer
