@@ -53,9 +53,7 @@ export function HotkeyHints() {
         ? ["c Console"]
         : ["cl Claude", "co Codex"];
       const pr = activeTask && gitStatuses[activeTask.id]?.pr;
-      const prHints = pr && (pr.unresolvedThreads > 0 || pr.ciFailed > 0)
-        ? ["v PR Issues"]
-        : [];
+      const prHints = pr ? ["v PR Issues"] : [];
       hints.push(
         "i Notes",
         "t Terminal",
