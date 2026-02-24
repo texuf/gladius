@@ -57,9 +57,8 @@ export async function computeTaskStatus(
     try {
       const gitStatus = await getGitStatusWithPr(worktreePath, branchName || undefined);
       if (gitStatus.pr) {
-        const totalComments = gitStatus.pr.comments + gitStatus.pr.reviewComments;
-        if (totalComments > 0) return "red";
-        if (gitStatus.pr.state === "open" && gitStatus.pr.ciPassing && totalComments === 0) return "green";
+        if (gitStatus.pr.unresolvedThreads > 0 || gitStatus.pr.ciFailed > 0) return "red";
+        if (gitStatus.pr.state === "open" && gitStatus.pr.ciFailed === 0 && gitStatus.pr.unresolvedThreads === 0) return "green";
       }
     } catch {}
   }

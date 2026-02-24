@@ -55,6 +55,7 @@ export function HotkeyHints() {
         "i Notes",
         "t Terminal",
         ...modelHints,
+        "r Refresh",
         "Esc Back",
         "x Close"
       );

@@ -62,20 +62,34 @@ export async function getGitStatusWithPr(repoPath: string, branchName?: string):
 async function getPrStatus(repoPath: string, branch: string): Promise<PrStatus | null> {
   try {
     const remoteUrl = (await $`git -C ${repoPath} remote get-url origin`.text()).trim();
-    const json = await $`gh pr view ${branch} --repo ${remoteUrl} --json number,state,comments,reviews,statusCheckRollup`.text();
+    const json = await $`gh pr view ${branch} --repo ${remoteUrl} --json number,state,statusCheckRollup`.text();
     const data = JSON.parse(json);
-    const reviewComments = Array.isArray(data.reviews)
-      ? data.reviews.filter((r: any) => r.state === "COMMENTED" || r.state === "CHANGES_REQUESTED").length
-      : 0;
-    // CI passing = all checks succeeded (or no checks)
+
+    // CI check counts
     const checks = Array.isArray(data.statusCheckRollup) ? data.statusCheckRollup : [];
-    const ciPassing = checks.length === 0 || checks.every((c: any) => c.conclusion === "SUCCESS");
+    const ciFailed = checks.filter((c: any) => c.conclusion === "FAILURE").length;
+    const ciPassed = checks.filter((c: any) => c.conclusion === "SUCCESS").length;
+
+    // Unresolved review threads via GraphQL
+    let unresolvedThreads = 0;
+    try {
+      // Parse owner/repo from remote URL (ssh or https)
+      const match = remoteUrl.match(/[:/]([^/]+)\/([^/.]+?)(?:\.git)?$/);
+      if (match) {
+        const [, owner, repo] = match;
+        const gql = await $`gh api graphql -f query=${'query { repository(owner: "' + owner + '", name: "' + repo + '") { pullRequest(number: ' + data.number + ') { reviewThreads(first: 100) { nodes { isResolved } } } } }'}`.text();
+        const gqlData = JSON.parse(gql);
+        const threads = gqlData?.data?.repository?.pullRequest?.reviewThreads?.nodes || [];
+        unresolvedThreads = threads.filter((t: any) => !t.isResolved).length;
+      }
+    } catch {}
+
     return {
       number: data.number,
       state: data.state === "MERGED" ? "merged" : data.state === "CLOSED" ? "closed" : "open",
-      comments: Array.isArray(data.comments) ? data.comments.length : 0,
-      reviewComments,
-      ciPassing,
+      unresolvedThreads,
+      ciPassed,
+      ciFailed,
     };
   } catch {
     return null;
@@ -115,7 +129,13 @@ export function formatGitStatus(status: GitStatus): string {
 
 export function formatPrStatus(pr: PrStatus): string {
   const state = pr.state === "open" ? "OPEN" : pr.state === "merged" ? "MERGED" : "CLOSED";
-  const totalComments = pr.comments + pr.reviewComments;
-  const commentStr = totalComments > 0 ? ` ${totalComments} comment${totalComments !== 1 ? "s" : ""}` : "";
-  return `PR #${pr.number} ${state}${commentStr}`;
+  const parts = [`PR #${pr.number} ${state}`];
+  const total = pr.ciPassed + pr.ciFailed;
+  if (total > 0) {
+    parts.push(pr.ciFailed > 0 ? `CI ${pr.ciPassed}/${total}` : `CI ✓`);
+  }
+  if (pr.unresolvedThreads > 0) {
+    parts.push(`${pr.unresolvedThreads} unresolved`);
+  }
+  return parts.join(" ");
 }

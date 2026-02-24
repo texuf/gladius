@@ -33,9 +33,9 @@ export interface TaskEvent {
 export interface PrStatus {
   number: number;
   state: "open" | "closed" | "merged";
-  comments: number;
-  reviewComments: number;
-  ciPassing: boolean;
+  unresolvedThreads: number;
+  ciPassed: number;
+  ciFailed: number;
 }
 
 export type TaskStatusColor = "green" | "red" | "orange" | "none";

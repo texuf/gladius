@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { useStore } from "../store/index.js";
 import { NotesPane } from "../components/NotesPane.js";
@@ -18,6 +18,9 @@ export function TaskView() {
   const setFocusPane = useStore((s) => s.setFocusPane);
   const chordBuffer = useStore((s) => s.chordBuffer);
   const setChordBuffer = useStore((s) => s.setChordBuffer);
+  const escCooldownRef = useRef(0);
+  const gitIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const prIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const setView = useStore((s) => s.setView);
   const setActiveTask = useStore((s) => s.setActiveTask);
   const modal = useStore((s) => s.modal);
@@ -25,30 +28,42 @@ export function TaskView() {
   const gitStatuses = useStore((s) => s.gitStatuses);
   const setGitStatus = useStore((s) => s.setGitStatus);
   const taskStatuses = useStore((s) => s.taskStatuses);
+  const [fetching, setFetching] = useState(false);
 
   // Poll git status (fast) and PR status (slower, separate)
-  useEffect(() => {
-    if (!activeTask?.worktree_path) return;
-    const pollGit = () => {
-      getGitStatus(activeTask.worktree_path!, activeTask.branch_name || undefined).then(
-        (status) => {
-          // Preserve existing PR data from the slower PR poll
-          const existing = useStore.getState().gitStatuses[activeTask.id];
-          if (existing?.pr) status.pr = existing.pr;
-          setGitStatus(activeTask.id, status);
-        }
-      );
-    };
-    const pollPr = () => {
-      getGitStatusWithPr(activeTask.worktree_path!, activeTask.branch_name || undefined).then(
-        (status) => setGitStatus(activeTask.id, status)
-      );
-    };
+  const pollGit = () => {
+    if (!activeTask?.worktree_path) return Promise.resolve();
+    return getGitStatus(activeTask.worktree_path, activeTask.branch_name || undefined).then(
+      (status) => {
+        const existing = useStore.getState().gitStatuses[activeTask.id];
+        if (existing?.pr) status.pr = existing.pr;
+        setGitStatus(activeTask.id, status);
+      }
+    );
+  };
+  const pollPr = () => {
+    if (!activeTask?.worktree_path) return Promise.resolve();
+    return getGitStatusWithPr(activeTask.worktree_path, activeTask.branch_name || undefined).then(
+      (status) => setGitStatus(activeTask.id, status)
+    );
+  };
+
+  const startPolling = () => {
+    if (gitIntervalRef.current) clearInterval(gitIntervalRef.current);
+    if (prIntervalRef.current) clearInterval(prIntervalRef.current);
     pollGit();
     pollPr();
-    const gitInterval = setInterval(pollGit, 5000);
-    const prInterval = setInterval(pollPr, 30000);
-    return () => { clearInterval(gitInterval); clearInterval(prInterval); };
+    gitIntervalRef.current = setInterval(pollGit, 5000);
+    prIntervalRef.current = setInterval(pollPr, 30000);
+  };
+
+  useEffect(() => {
+    if (!activeTask?.worktree_path) return;
+    startPolling();
+    return () => {
+      if (gitIntervalRef.current) clearInterval(gitIntervalRef.current);
+      if (prIntervalRef.current) clearInterval(prIntervalRef.current);
+    };
   }, [activeTask?.id]);
 
   useInput((input, key) => {
@@ -58,12 +73,15 @@ export function TaskView() {
     if (focusPane !== "none") {
       if (key.escape) {
         setFocusPane("none");
+        escCooldownRef.current = Date.now();
       }
       return;
     }
 
     // Esc when nothing is focused → go back to task list
+    // Skip if we just unfocused a pane (Ink sees the same Esc event)
     if (key.escape) {
+      if (Date.now() - escCooldownRef.current < 100) return;
       setView("tasks");
       return;
     }
@@ -81,6 +99,21 @@ export function TaskView() {
 
     if (input === "c" && !key.super && activeTask?.model) {
       setFocusPane("console");
+      return;
+    }
+
+    // Refresh git + PR status and reset polling
+    if (input === "r" && !key.super) {
+      setFetching(true);
+      if (gitIntervalRef.current) clearInterval(gitIntervalRef.current);
+      if (prIntervalRef.current) clearInterval(prIntervalRef.current);
+      const gitP = pollGit();
+      const prP = pollPr();
+      Promise.all([gitP, prP]).then(() => {
+        setFetching(false);
+        gitIntervalRef.current = setInterval(pollGit, 5000);
+        prIntervalRef.current = setInterval(pollPr, 30000);
+      });
       return;
     }
 
@@ -151,13 +184,23 @@ export function TaskView() {
           <Text bold color="cyan">
             {activeTask.label}
           </Text>
-          {gitStatus && (
-            <Text dimColor> {formatGitStatus(gitStatus)}</Text>
-          )}
-          {gitStatus?.pr && (
-            <Text color={gitStatus.pr.state === "open" ? "green" : gitStatus.pr.state === "merged" ? "magenta" : "red"}>
-              {" "}{formatPrStatus(gitStatus.pr)}
-            </Text>
+          {fetching ? (
+            <Text dimColor> Fetching...</Text>
+          ) : (
+            <>
+              {gitStatus && (
+                <Text dimColor> {formatGitStatus(gitStatus)}</Text>
+              )}
+              {gitStatus?.pr && (
+                <Text color={
+                  gitStatus.pr.ciFailed > 0 || gitStatus.pr.unresolvedThreads > 0 ? "red"
+                    : gitStatus.pr.state === "merged" ? "magenta"
+                    : "green"
+                }>
+                  {" "}{formatPrStatus(gitStatus.pr)}
+                </Text>
+              )}
+            </>
           )}
         </Box>
         <Box gap={1}>
