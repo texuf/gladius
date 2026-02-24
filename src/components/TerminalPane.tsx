@@ -65,7 +65,7 @@ export function TerminalPane({ type, label, focusKey, paused = false }: Terminal
   const consoleDims = canEmbed && type === "console" ? getConsoleDimensions() : null;
 
   const command = type === "console" && activeTask?.model
-    ? buildLlmCommand(activeTask.model, activeTask.session_id)
+    ? buildLlmCommand(activeTask.model, activeTask.session_id, activeTask.worktree_path ?? undefined)
     : undefined;
 
   // Session ID capture for console pane
