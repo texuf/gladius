@@ -11,7 +11,7 @@ export interface Task {
   project_id: string;
   label: string;
   description: string;
-  status: "active" | "closed";
+  status: "active" | "closing" | "closed";
   model: "claude" | "codex" | null;
   session_id: string | null;
   worktree_path: string | null;

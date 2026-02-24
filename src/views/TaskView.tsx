@@ -224,22 +224,29 @@ export function TaskView() {
     setFetching(false);
   };
 
-  const handleCloseTask = async () => {
+  const handleCloseTask = () => {
     if (!activeTask || !activeProject) return;
     // Persist session_id if captured during this session
     if (activeTask.session_id) {
       updateTask(activeTask.id, { session_id: activeTask.session_id });
     }
-    destroySession(`${activeTask.id}-terminal`);
-    destroySession(`${activeTask.id}-console`);
-    if (activeTask.worktree_path) {
-      await deleteWorktree(activeProject.path, activeTask.worktree_path, activeTask.branch_name);
-    }
-    dbCloseTask(activeTask.id);
-    setTasks(getTasksForProject(activeProject.id));
+    // Mark as closing immediately and navigate away
+    const closingTask = { ...activeTask, status: "closing" as const };
+    setTasks(useStore.getState().tasks.map((t) => t.id === activeTask.id ? closingTask : t));
     setActiveTask(null);
     setModal(null);
     setView("tasks");
+
+    // Run slow cleanup in background
+    (async () => {
+      destroySession(`${activeTask.id}-terminal`);
+      destroySession(`${activeTask.id}-console`);
+      if (activeTask.worktree_path) {
+        await deleteWorktree(activeProject.path, activeTask.worktree_path, activeTask.branch_name);
+      }
+      dbCloseTask(activeTask.id);
+      useStore.getState().setTasks(getTasksForProject(activeProject.id));
+    })();
   };
 
   if (!activeTask) return null;
