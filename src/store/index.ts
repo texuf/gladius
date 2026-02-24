@@ -15,6 +15,7 @@ export const useStore = create<AppState>((set) => ({
   // Task View
   focusPane: "none",
   chordBuffer: "",
+  copyMode: false,
 
   // Project Selection
   addingProject: false,
@@ -37,12 +38,13 @@ export const useStore = create<AppState>((set) => ({
   },
   setActiveTask: (activeTask) => {
     setAppState("nav.task_id", activeTask?.id ?? null);
-    set({ activeTask, focusPane: "none", chordBuffer: "" });
+    set({ activeTask, focusPane: "none", chordBuffer: "", copyMode: false });
   },
   setSelectedIndex: (selectedIndex) => set({ selectedIndex }),
   setModal: (modal) => set({ modal }),
   setFocusPane: (focusPane) => set({ focusPane }),
   setChordBuffer: (chordBuffer) => set({ chordBuffer }),
+  setCopyMode: (copyMode) => set({ copyMode }),
   setAddingProject: (addingProject) => set({ addingProject }),
   setProjects: (projects) => set({ projects }),
   setTasks: (tasks) => set({ tasks }),

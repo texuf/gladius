@@ -10,6 +10,7 @@ interface TerminalPaneProps {
   type: "terminal" | "console";
   label: string;
   focusKey: string;
+  paused?: boolean;
 }
 
 // Layout overhead for the terminal pane:
@@ -40,7 +41,7 @@ function getConsoleDimensions() {
   return { ptyRows, ptyCols };
 }
 
-export function TerminalPane({ type, label, focusKey }: TerminalPaneProps) {
+export function TerminalPane({ type, label, focusKey, paused = false }: TerminalPaneProps) {
   const focusPane = useStore((s) => s.focusPane);
   const setFocusPane = useStore((s) => s.setFocusPane);
   const activeTask = useStore((s) => s.activeTask);
@@ -124,6 +125,7 @@ export function TerminalPane({ type, label, focusKey }: TerminalPaneProps) {
           cwd={activeTask!.worktree_path!}
           command={command}
           focused={isFocused}
+          paused={paused}
           singleEsc={type === "console"}
           rows={type === "terminal" ? dims!.ptyRows : consoleDims!.ptyRows}
           cols={type === "terminal" ? dims!.ptyCols : consoleDims!.ptyCols}

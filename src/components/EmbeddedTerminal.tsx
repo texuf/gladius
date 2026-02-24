@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Box, Text } from "ink";
 import { Terminal } from "@xterm/headless";
 import { execSync } from "child_process";
-import { getOrCreateSession } from "../services/terminalManager.js";
+import { getOrCreateSession, getSession } from "../services/terminalManager.js";
 import { useStore } from "../store/index.js";
 
 interface EmbeddedTerminalProps {
@@ -10,6 +10,7 @@ interface EmbeddedTerminalProps {
   cwd: string;
   command?: string[];
   focused?: boolean;
+  paused?: boolean;
   rows?: number;
   cols?: number;
   singleEsc?: boolean;
@@ -123,7 +124,7 @@ export function getCwd(pid: number): string {
 const DEFAULT_CHROME_ROWS = 7;
 const DEFAULT_CHROME_COLS = 4;
 
-export function EmbeddedTerminal({ taskId, cwd, command, focused = true, rows: propRows, cols: propCols, singleEsc = false, onEsc, onError }: EmbeddedTerminalProps) {
+export function EmbeddedTerminal({ taskId, cwd, command, focused = true, paused = false, rows: propRows, cols: propCols, singleEsc = false, onEsc, onError }: EmbeddedTerminalProps) {
   const [lines, setLines] = useState<string[]>([]);
   const stdinListenerRef = useRef<((data: Buffer | string) => void) | null>(null);
   const renderIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -284,6 +285,37 @@ export function EmbeddedTerminal({ taskId, cwd, command, focused = true, rows: p
       process.stdout.removeListener("resize", onResize);
     };
   }, [taskId]);
+
+  // Pause/resume render loop for copy mode
+  const xtermRef = useRef<Terminal | null>(null);
+
+  // Store xterm ref when session is created (set inside the main useEffect above
+  // isn't accessible here, so we look it up from the session manager)
+  useEffect(() => {
+    const session = getSession(taskId);
+    if (session) xtermRef.current = session.xterm;
+  }, [taskId]);
+
+  useEffect(() => {
+    if (paused) {
+      // Stop the render interval
+      if (renderIntervalRef.current) {
+        clearInterval(renderIntervalRef.current);
+        renderIntervalRef.current = null;
+      }
+    } else {
+      // Resume: do one immediate render, then restart interval
+      if (xtermRef.current) {
+        setLines(bufferToAnsiLines(xtermRef.current));
+      }
+      if (!renderIntervalRef.current && xtermRef.current) {
+        const xterm = xtermRef.current;
+        renderIntervalRef.current = setInterval(() => {
+          setLines(bufferToAnsiLines(xterm));
+        }, 33);
+      }
+    }
+  }, [paused]);
 
   return (
     <Box flexDirection="column" flexGrow={1}>

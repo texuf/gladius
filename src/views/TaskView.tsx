@@ -31,6 +31,8 @@ export function TaskView() {
   const gitStatuses = useStore((s) => s.gitStatuses);
   const setGitStatus = useStore((s) => s.setGitStatus);
   const taskStatuses = useStore((s) => s.taskStatuses);
+  const copyMode = useStore((s) => s.copyMode);
+  const setCopyMode = useStore((s) => s.setCopyMode);
   const [fetching, setFetching] = useState(false);
 
   // Track when focusPane transitions to "none" (covers both useInput and raw stdin onEsc)
@@ -95,6 +97,16 @@ export function TaskView() {
     };
   }, [activeTask?.id]);
 
+  // Pause/resume polling when copy mode toggles
+  useEffect(() => {
+    if (copyMode) {
+      if (gitIntervalRef.current) { clearInterval(gitIntervalRef.current); gitIntervalRef.current = null; }
+      if (prIntervalRef.current) { clearInterval(prIntervalRef.current); prIntervalRef.current = null; }
+    } else if (activeTask?.worktree_path) {
+      startPolling();
+    }
+  }, [copyMode]);
+
   useInput((input, key) => {
     if (modal) return;
 
@@ -103,6 +115,14 @@ export function TaskView() {
       if (key.escape) {
         setFocusPane("none");
         escCooldownRef.current = Date.now();
+      }
+      return;
+    }
+
+    // Copy mode: Esc or y exits copy mode (before any other handling)
+    if (copyMode) {
+      if (key.escape || input === "y") {
+        setCopyMode(false);
       }
       return;
     }
@@ -188,6 +208,12 @@ export function TaskView() {
       return;
     }
 
+    // Copy mode toggle
+    if (input === "y" && !key.super) {
+      setCopyMode(true);
+      return;
+    }
+
     // Chord handling for model selection
     if (!activeTask?.model) {
       const { newBuffer, chord } = processChord(chordBuffer, input, key);
@@ -270,6 +296,9 @@ export function TaskView() {
           <Text bold color="cyan">
             {activeTask.label}
           </Text>
+          {copyMode && (
+            <Text bold color="yellow"> COPY MODE</Text>
+          )}
           {fetching ? (
             <Text dimColor> Fetching...</Text>
           ) : (
@@ -304,10 +333,10 @@ export function TaskView() {
       <NotesPane />
 
       {/* Terminal Pane (15%) */}
-      <TerminalPane type="terminal" label="Terminal" focusKey="t" />
+      <TerminalPane type="terminal" label="Terminal" focusKey="t" paused={copyMode} />
 
       {/* Console Pane (65%) */}
-      <TerminalPane type="console" label="Console" focusKey="c" />
+      <TerminalPane type="console" label="Console" focusKey="c" paused={copyMode} />
 
       {/* Confirm Modal */}
       {modal?.type === "confirm" && (

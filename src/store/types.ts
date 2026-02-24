@@ -93,6 +93,7 @@ export interface AppState {
   // Task View
   focusPane: FocusPane;
   chordBuffer: string;
+  copyMode: boolean;
 
   // Project Selection
   addingProject: boolean;
@@ -112,6 +113,7 @@ export interface AppState {
   setModal: (modal: ModalState) => void;
   setFocusPane: (pane: FocusPane) => void;
   setChordBuffer: (chord: string) => void;
+  setCopyMode: (copyMode: boolean) => void;
   setAddingProject: (adding: boolean) => void;
   setProjects: (projects: Project[]) => void;
   setTasks: (tasks: Task[]) => void;

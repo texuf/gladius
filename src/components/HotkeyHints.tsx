@@ -20,6 +20,7 @@ export function HotkeyHints() {
   const activeTask = useStore((s) => s.activeTask);
   const addingProject = useStore((s) => s.addingProject);
   const gitStatuses = useStore((s) => s.gitStatuses);
+  const copyMode = useStore((s) => s.copyMode);
 
   const [pty, setPty] = useState({ used: 0, max: 0 });
 
@@ -48,7 +49,9 @@ export function HotkeyHints() {
       "Ctrl+O Projects"
     );
   } else if (view === "taskView") {
-    if (focusPane === "none") {
+    if (copyMode) {
+      hints.push("y Exit Copy", "Esc Exit Copy");
+    } else if (focusPane === "none") {
       const modelHints = activeTask?.model
         ? ["c Console"]
         : ["cl Claude", "co Codex"];
@@ -63,6 +66,7 @@ export function HotkeyHints() {
         ...modelHints,
         ...prHints,
         ...mergeHints,
+        "y Copy",
         "r Refresh",
         "Esc Back",
         "x Close"
