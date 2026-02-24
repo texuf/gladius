@@ -16,7 +16,7 @@ export async function createWorktree(
 ): Promise<string> {
   const branchName = `${BRANCH_PREFIX}/${label}`;
   const projectName = basename(projectPath);
-  const worktreeDir = join(homedir(), ".gladius", "worktrees", projectName);
+  const worktreeDir = join(homedir(), ".wt", projectName);
   const worktreePath = join(worktreeDir, label);
 
   // Ensure worktree directory exists

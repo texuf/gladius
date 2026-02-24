@@ -144,7 +144,7 @@ export function TerminalPane({ type, label, focusKey, paused = false }: Terminal
               {"\n"}Press {type === "console" ? "Esc" : "Esc×2"} to unfocus
             </Text>
           ) : (
-            <Text dimColor>Press {focusKey} to focus</Text>
+            <Text dimColor>{type === "console" && !activeTask?.model ? "cl: claude / co: codex" : `Press ${focusKey} to focus`}</Text>
           )}
         </Box>
       )}

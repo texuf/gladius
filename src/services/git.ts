@@ -262,11 +262,29 @@ function extractFailedStepLog(rawLog: string, stepName: string): string {
     if (i > stepStart && line.includes("##[group]Run ")) break;
   }
 
-  if (stepStart === -1) return "";
+  // Fallback: step name (e.g. "Run CI Integration Tests") doesn't match any
+  // ##[group] marker (which may use the actual command like "Run bun run test:ci").
+  // Instead, anchor on the last meaningful ##[error] line in the log.
+  if (stepStart === -1) {
+    const lastGenericError = "Process completed with exit code";
+    let lastMeaningfulError = -1;
+    let lastError = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes("##[error]")) {
+        lastError = i;
+        if (!lines[i].includes(lastGenericError)) {
+          lastMeaningfulError = i;
+        }
+      }
+    }
+    errorLine = lastMeaningfulError !== -1 ? lastMeaningfulError : lastError;
+    if (errorLine === -1) return "";
+    stepStart = 0;
+  }
 
-  // Determine the range to extract: up to 40 lines before the error, through a few lines after
-  const end = errorLine !== -1 ? Math.min(errorLine + 5, lines.length) : lines.length;
-  const tailStart = errorLine !== -1 ? Math.max(stepStart + 1, errorLine - 40) : Math.max(stepStart + 1, end - 60);
+  // Determine the range to extract: up to 60 lines before the error, through lines after
+  const end = errorLine !== -1 ? Math.min(errorLine + 20, lines.length) : lines.length;
+  const tailStart = errorLine !== -1 ? Math.max(stepStart + 1, errorLine - 60) : Math.max(stepStart + 1, end - 60);
 
   const result: string[] = [];
   for (let i = tailStart; i < end; i++) {
