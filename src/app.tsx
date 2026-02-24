@@ -9,6 +9,7 @@ import { TaskSwitcher } from "./views/TaskSwitcher.js";
 import { ConfirmModal } from "./components/ConfirmModal.js";
 import { HotkeyHints } from "./components/HotkeyHints.js";
 import { hasModifier } from "./utils/keyboard.js";
+import type { ViewState } from "./store/types.js";
 import { computeAllTaskStatuses } from "./services/taskStatus.js";
 
 export function App() {
@@ -22,12 +23,12 @@ export function App() {
 
   // Restore navigation breadcrumb on startup
   useEffect(() => {
-    const savedView = getAppState("nav.view");
+    const savedView = getAppState("nav.view") as ViewState | null;
     const savedProjectId = getAppState("nav.project_id");
     const savedTaskId = getAppState("nav.task_id");
 
     if (!savedProjectId) {
-      if (savedView) useStore.getState().setView(savedView as any);
+      if (savedView) useStore.getState().setView(savedView);
       return;
     }
 
@@ -42,12 +43,16 @@ export function App() {
       const task = tasks.find((t) => t.id === savedTaskId && t.status === "active");
       if (task) {
         useStore.getState().setActiveTask(task);
-        useStore.getState().setView("taskView");
-        return;
       }
     }
 
-    useStore.getState().setView("tasks");
+    // Restore the actual saved view (projects, tasks, or taskView)
+    // Fall back to tasks if we were on taskView but the task no longer exists
+    if (savedView === "taskView" && !useStore.getState().activeTask) {
+      useStore.getState().setView("tasks");
+    } else {
+      useStore.getState().setView(savedView || "tasks");
+    }
   }, []);
 
   // Poll task statuses globally (LLM activity + PR status)

@@ -199,23 +199,25 @@ export function TaskList() {
         const taskColor = taskStatuses[task.id];
         return (
           <Box key={task.id} flexDirection="column" paddingLeft={1} marginBottom={1}>
-            <Box justifyContent="space-between">
-              <Text
-                color={isSelected ? "cyan" : undefined}
-                bold={isSelected}
-                dimColor={isClosed && !isSelected}
-              >
-                {isSelected ? "▸ " : "  "}
-                {isClosed ? "[closed] " : ""}
-                {task.label}
-              </Text>
-              {!isClosed && taskColor && taskColor !== "none" && (
+            <Box>
+              {!isClosed && taskColor && taskColor !== "none" ? (
                 <StatusDots
                   green={taskColor === "green" ? 1 : 0}
                   red={taskColor === "red" ? 1 : 0}
                   orange={taskColor === "orange" ? 1 : 0}
                 />
+              ) : (
+                <Text> </Text>
               )}
+              <Text
+                color={isSelected ? "cyan" : undefined}
+                bold={isSelected}
+                dimColor={isClosed && !isSelected}
+              >
+                {isSelected ? " ▸ " : "   "}
+                {isClosed ? "[closed] " : ""}
+                {task.label}
+              </Text>
             </Box>
             <Box paddingLeft={4}>
               <Text dimColor>
