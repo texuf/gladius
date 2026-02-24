@@ -5,12 +5,11 @@ import { NotesPane } from "../components/NotesPane.js";
 import { TerminalPane } from "../components/TerminalPane.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { processChord } from "../utils/keyboard.js";
-import { formatGitStatus, formatPrStatus, getGitStatus, getGitStatusWithPr, getPrComments, resolveThread } from "../services/git.js";
+import { formatGitStatus, formatPrStatus, getGitStatus, getGitStatusWithPr } from "../services/git.js";
 import { closeTask as dbCloseTask, updateTask, getTasksForProject } from "../services/db.js";
 import { deleteWorktree } from "../services/worktree.js";
-import { destroySession, writeToSession } from "../services/terminalManager.js";
+import { destroySession } from "../services/terminalManager.js";
 import { StatusDots } from "../components/StatusDots.js";
-import { PrCommentViewer } from "../components/PrCommentViewer.js";
 
 export function TaskView() {
   const activeTask = useStore((s) => s.activeTask);
@@ -80,8 +79,10 @@ export function TaskView() {
     }
 
     // Esc when nothing is focused → go back to task list
-    // Skip if we just unfocused a pane (Ink sees the same Esc event)
+    // Guard: double-check store directly in case React subscription is stale
+    // (EmbeddedTerminal's raw stdin handler may have already set focusPane to "none")
     if (key.escape) {
+      if (useStore.getState().focusPane !== "none") return;
       if (Date.now() - escCooldownRef.current < 100) return;
       setView("tasks");
       return;
@@ -130,14 +131,7 @@ export function TaskView() {
 
     // View PR comments
     if (input === "v" && !key.super && activeTask?.worktree_path) {
-      setFetching(true);
-      getPrComments(activeTask.worktree_path, activeTask.branch_name || undefined)
-        .then((threads) => {
-          setFetching(false);
-          if (threads.length > 0) {
-            setModal({ type: "prComments", threads });
-          }
-        });
+      setView("prComments");
       return;
     }
 
@@ -245,21 +239,6 @@ export function TaskView() {
         />
       )}
 
-      {/* PR Comment Viewer */}
-      {modal?.type === "prComments" && (
-        <PrCommentViewer
-          threads={modal.threads}
-          onPaste={(text) => {
-            writeToSession(`${activeTask!.id}-console`, text);
-            setModal(null);
-            setFocusPane("console");
-          }}
-          onResolve={(threadId) => {
-            resolveThread(threadId).then(() => pollPr());
-          }}
-          onClose={() => setModal(null)}
-        />
-      )}
     </Box>
   );
 }

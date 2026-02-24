@@ -52,8 +52,9 @@ export function HotkeyHints() {
       const modelHints = activeTask?.model
         ? ["c Console"]
         : ["cl Claude", "co Codex"];
-      const prHints = activeTask && gitStatuses[activeTask.id]?.pr?.unresolvedThreads
-        ? ["v Comments"]
+      const pr = activeTask && gitStatuses[activeTask.id]?.pr;
+      const prHints = pr && (pr.unresolvedThreads > 0 || pr.ciFailed > 0)
+        ? ["v PR Issues"]
         : [];
       hints.push(
         "i Notes",
@@ -68,6 +69,8 @@ export function HotkeyHints() {
       const escHint = focusPane === "console" ? "Esc" : "Esc×2";
       hints.push(`${escHint} Unfocus (${focusPane})`);
     }
+  } else if (view === "prComments") {
+    hints.push("↑↓ Navigate", "p Paste to Console", "s Resolve", "Esc Back");
   }
 
   return (

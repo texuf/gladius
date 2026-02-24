@@ -49,7 +49,7 @@ export interface GitStatus {
   pr: PrStatus | null;
 }
 
-export type ViewState = "projects" | "tasks" | "taskView" | "taskSwitcher";
+export type ViewState = "projects" | "tasks" | "taskView" | "taskSwitcher" | "prComments";
 
 export type FocusPane = "none" | "notes" | "terminal" | "console";
 
@@ -67,10 +67,16 @@ export interface ReviewComment {
   createdAt: string;
 }
 
+export interface CiCheckFailure {
+  name: string;              // Job name e.g. "Common_CI"
+  failedStep: string | null; // Step name e.g. "Prettier"
+  detailsUrl: string;
+  log: string;               // Extracted log output for the failed step
+}
+
 export type ModalState =
   | { type: "newTask" }
   | { type: "confirm"; message: string; onConfirm: () => void }
-  | { type: "prComments"; threads: ReviewThread[] }
   | null;
 
 export interface AppState {

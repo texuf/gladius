@@ -1,5 +1,5 @@
 import { $ } from "bun";
-import type { GitStatus, PrStatus, ReviewThread } from "../store/types.js";
+import type { GitStatus, PrStatus, ReviewThread, CiCheckFailure } from "../store/types.js";
 
 /**
  * Get git status information for a given repo path.
@@ -224,6 +224,119 @@ export async function resolveThread(threadId: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Extract the log output for a failed step from raw job logs.
+ * Logs use ##[group] markers to delimit steps and timestamps prefix each line.
+ */
+function extractFailedStepLog(rawLog: string, stepName: string): string {
+  const lines = rawLog.split("\n");
+  // Find the group header for this step
+  let start = -1;
+  let pastHeader = false;
+  const result: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (start === -1) {
+      // Match step group: ##[group]Run ... or ##[group]<step name>
+      if (line.includes(`##[group]`) && line.toLowerCase().includes(stepName.toLowerCase())) {
+        start = i;
+      }
+      continue;
+    }
+
+    // Skip the header block (env vars etc) until ##[endgroup]
+    if (!pastHeader) {
+      if (line.includes("##[endgroup]")) {
+        pastHeader = true;
+      }
+      continue;
+    }
+
+    // Stop at the next step's group
+    if (line.includes("##[group]")) break;
+
+    // Strip timestamp prefix (e.g. "2026-02-24T00:56:42.7641237Z ")
+    const stripped = line.replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s?/, "");
+    // Skip ##[error] wrapper — the actual error is in the content lines
+    if (stripped.startsWith("##[error]")) {
+      result.push(stripped.replace("##[error]", "").trim());
+    } else {
+      result.push(stripped);
+    }
+  }
+
+  // Trim trailing empty lines, cap at 60 lines
+  const trimmed = result.join("\n").trimEnd();
+  const outputLines = trimmed.split("\n");
+  if (outputLines.length > 60) {
+    return outputLines.slice(0, 60).join("\n") + "\n... (truncated)";
+  }
+  return trimmed;
+}
+
+/**
+ * Fetch CI check failures with log output for a PR.
+ * Uses the Actions API to get workflow runs → jobs → failed steps → logs.
+ */
+export async function getCiFailures(repoPath: string, branch?: string): Promise<CiCheckFailure[]> {
+  try {
+    const branchName = branch || (await getCurrentBranch(repoPath));
+    const remoteUrl = (await $`git -C ${repoPath} remote get-url origin`.text()).trim();
+    const parsed = parseOwnerRepo(remoteUrl);
+    if (!parsed) return [];
+
+    // Get head SHA from PR
+    const prJson = await $`gh pr view ${branchName} --repo ${remoteUrl} --json headRefOid`.text();
+    const { headRefOid: sha } = JSON.parse(prJson);
+
+    // Get failed workflow runs for this commit
+    const runsEndpoint = `repos/${parsed.owner}/${parsed.repo}/actions/runs?head_sha=${sha}&status=failure`;
+    const runsJson = await $`gh api ${runsEndpoint}`.text();
+    const { workflow_runs: runs } = JSON.parse(runsJson);
+    if (!runs || runs.length === 0) return [];
+
+    // Get failed jobs across all failed runs in parallel
+    const jobResults = await Promise.all(
+      (runs as any[]).map(async (run: any) => {
+        const jobsJson = await $`gh api repos/${parsed.owner}/${parsed.repo}/actions/runs/${run.id}/jobs`.text();
+        const { jobs } = JSON.parse(jobsJson);
+        return (jobs || []).filter((j: any) => j.conclusion === "failure").map((j: any) => ({
+          ...j,
+          runUrl: run.html_url,
+        }));
+      })
+    );
+    const failedJobs = jobResults.flat();
+
+    // Fetch logs for each failed job in parallel
+    const results: CiCheckFailure[] = await Promise.all(
+      failedJobs.map(async (job: any): Promise<CiCheckFailure> => {
+        const failedStep = (job.steps || []).find((s: any) => s.conclusion === "failure");
+        let log = "";
+
+        if (failedStep) {
+          try {
+            const rawLog = await $`gh api repos/${parsed.owner}/${parsed.repo}/actions/jobs/${job.id}/logs`.text();
+            log = extractFailedStepLog(rawLog, failedStep.name);
+          } catch {}
+        }
+
+        return {
+          name: job.name || "",
+          failedStep: failedStep?.name || null,
+          detailsUrl: job.html_url || job.runUrl || "",
+          log,
+        };
+      })
+    );
+
+    return results;
+  } catch {
+    return [];
   }
 }
 
