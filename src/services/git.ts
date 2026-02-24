@@ -233,53 +233,55 @@ export async function resolveThread(threadId: string): Promise<boolean> {
 
 /**
  * Extract the log output for a failed step from raw job logs.
- * Logs use ##[group] markers to delimit steps and timestamps prefix each line.
+ * Strategy: find the ##[error] line for this step, then grab the preceding
+ * lines of output (the tail). This works well for large steps (like turbo build)
+ * where the error is at the end after hundreds of lines of sub-task output.
  */
 function extractFailedStepLog(rawLog: string, stepName: string): string {
   const lines = rawLog.split("\n");
-  // Find the group header for this step
-  let start = -1;
-  let pastHeader = false;
-  const result: string[] = [];
+  const stepLower = stepName.toLowerCase();
+
+  // Find the step's ##[group] start and the ##[error] that ends it
+  let stepStart = -1;
+  let errorLine = -1;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (start === -1) {
-      // Match step group: ##[group]Run ... or ##[group]<step name>
-      if (line.includes(`##[group]`) && line.toLowerCase().includes(stepName.toLowerCase())) {
-        start = i;
+    if (stepStart === -1) {
+      if (line.includes("##[group]") && line.toLowerCase().includes(stepLower)) {
+        stepStart = i;
       }
       continue;
     }
-
-    // Skip the header block (env vars etc) until ##[endgroup]
-    if (!pastHeader) {
-      if (line.includes("##[endgroup]")) {
-        pastHeader = true;
-      }
-      continue;
+    // Find the last ##[error] within this step's range
+    // (before the next top-level step, identified by ##[group]Run or end of log)
+    if (line.includes("##[error]")) {
+      errorLine = i;
     }
+    // Stop at the next step's "Run" group (top-level step boundary)
+    if (i > stepStart && line.includes("##[group]Run ")) break;
+  }
 
-    // Stop at the next step's group
-    if (line.includes("##[group]")) break;
+  if (stepStart === -1) return "";
 
-    // Strip timestamp prefix (e.g. "2026-02-24T00:56:42.7641237Z ")
-    const stripped = line.replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s?/, "");
-    // Skip ##[error] wrapper — the actual error is in the content lines
+  // Determine the range to extract: up to 40 lines before the error, through a few lines after
+  const end = errorLine !== -1 ? Math.min(errorLine + 5, lines.length) : lines.length;
+  const tailStart = errorLine !== -1 ? Math.max(stepStart + 1, errorLine - 40) : Math.max(stepStart + 1, end - 60);
+
+  const result: string[] = [];
+  for (let i = tailStart; i < end; i++) {
+    const line = lines[i];
+    // Skip group/endgroup markers from sub-tasks
+    if (line.includes("##[group]") || line.includes("##[endgroup]")) continue;
+    // Strip timestamp prefix
+    let stripped = line.replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s?/, "");
     if (stripped.startsWith("##[error]")) {
-      result.push(stripped.replace("##[error]", "").trim());
-    } else {
-      result.push(stripped);
+      stripped = stripped.replace("##[error]", "").trim();
     }
+    result.push(stripped);
   }
 
-  // Trim trailing empty lines, cap at 60 lines
-  const trimmed = result.join("\n").trimEnd();
-  const outputLines = trimmed.split("\n");
-  if (outputLines.length > 60) {
-    return outputLines.slice(0, 60).join("\n") + "\n... (truncated)";
-  }
-  return trimmed;
+  return result.join("\n").trimEnd();
 }
 
 /**
