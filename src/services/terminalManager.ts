@@ -194,3 +194,18 @@ export function destroyAllSessions(): void {
     destroySession(taskId);
   }
 }
+
+/**
+ * Write text to a session's PTY (sends keystrokes).
+ * Returns false if no session exists.
+ */
+export function writeToSession(taskId: string, text: string): boolean {
+  const session = sessions.get(taskId);
+  if (!session) return false;
+  try {
+    session.proc.terminal!.write(text);
+    return true;
+  } catch {
+    return false;
+  }
+}

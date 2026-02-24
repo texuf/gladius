@@ -53,9 +53,24 @@ export type ViewState = "projects" | "tasks" | "taskView" | "taskSwitcher";
 
 export type FocusPane = "none" | "notes" | "terminal" | "console";
 
+export interface ReviewThread {
+  id: string;
+  path: string;
+  line: number;
+  startLine: number | null;
+  comments: ReviewComment[];
+}
+
+export interface ReviewComment {
+  body: string;
+  author: string;
+  createdAt: string;
+}
+
 export type ModalState =
   | { type: "newTask" }
   | { type: "confirm"; message: string; onConfirm: () => void }
+  | { type: "prComments"; threads: ReviewThread[] }
   | null;
 
 export interface AppState {

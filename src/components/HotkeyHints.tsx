@@ -19,6 +19,7 @@ export function HotkeyHints() {
   const focusPane = useStore((s) => s.focusPane);
   const activeTask = useStore((s) => s.activeTask);
   const addingProject = useStore((s) => s.addingProject);
+  const gitStatuses = useStore((s) => s.gitStatuses);
 
   const [pty, setPty] = useState({ used: 0, max: 0 });
 
@@ -51,10 +52,14 @@ export function HotkeyHints() {
       const modelHints = activeTask?.model
         ? ["c Console"]
         : ["cl Claude", "co Codex"];
+      const prHints = activeTask && gitStatuses[activeTask.id]?.pr?.unresolvedThreads
+        ? ["v Comments"]
+        : [];
       hints.push(
         "i Notes",
         "t Terminal",
         ...modelHints,
+        ...prHints,
         "r Refresh",
         "Esc Back",
         "x Close"

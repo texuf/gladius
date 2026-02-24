@@ -1,5 +1,5 @@
 import { $ } from "bun";
-import type { GitStatus, PrStatus } from "../store/types.js";
+import type { GitStatus, PrStatus, ReviewThread } from "../store/types.js";
 
 /**
  * Get git status information for a given repo path.
@@ -125,6 +125,106 @@ export function formatGitStatus(status: GitStatus): string {
   }
 
   return parts.join(" ");
+}
+
+/**
+ * Parse owner/repo from a git remote URL (ssh or https).
+ */
+function parseOwnerRepo(remoteUrl: string): { owner: string; repo: string } | null {
+  const match = remoteUrl.match(/[:/]([^/]+)\/([^/.]+?)(?:\.git)?$/);
+  if (!match) return null;
+  return { owner: match[1], repo: match[2] };
+}
+
+/**
+ * Strip cursor bugbot noise and HTML from a comment body.
+ */
+function cleanCommentBody(body: string): string {
+  // If description markers exist, extract between them
+  const descMatch = body.match(/<!-- DESCRIPTION START -->([\s\S]*?)<!-- DESCRIPTION END -->/);
+  if (descMatch) {
+    body = descMatch[1].trim();
+  }
+
+  return body
+    .replace(/<!--[\s\S]*?-->/g, "")                    // HTML comments
+    .replace(/<details[\s\S]*?<\/details>/gi, "")        // <details> blocks
+    .replace(/<picture[\s\S]*?<\/picture>/gi, "")        // <picture> blocks
+    .replace(/<a\s+href="https?:\/\/cursor\.com[^"]*"[^>]*>[\s\S]*?<\/a>/gi, "") // cursor links
+    .replace(/<\/?[^>]+>/g, "")                          // remaining HTML tags
+    .replace(/\n{3,}/g, "\n\n")                          // collapse blank lines
+    .trim();
+}
+
+/**
+ * Fetch unresolved PR review threads with full comment bodies.
+ */
+export async function getPrComments(repoPath: string, branch?: string): Promise<ReviewThread[]> {
+  try {
+    const branchName = branch || (await getCurrentBranch(repoPath));
+    const remoteUrl = (await $`git -C ${repoPath} remote get-url origin`.text()).trim();
+    const parsed = parseOwnerRepo(remoteUrl);
+    if (!parsed) return [];
+
+    // Get PR number first
+    const prJson = await $`gh pr view ${branchName} --repo ${remoteUrl} --json number`.text();
+    const { number: prNumber } = JSON.parse(prJson);
+
+    const query = `query {
+      repository(owner: "${parsed.owner}", name: "${parsed.repo}") {
+        pullRequest(number: ${prNumber}) {
+          reviewThreads(first: 100) {
+            nodes {
+              id
+              isResolved
+              path
+              line
+              startLine
+              comments(first: 10) {
+                nodes {
+                  body
+                  author { login }
+                  createdAt
+                }
+              }
+            }
+          }
+        }
+      }
+    }`;
+
+    const gql = await $`gh api graphql -f query=${query}`.text();
+    const data = JSON.parse(gql);
+    const threads = data?.data?.repository?.pullRequest?.reviewThreads?.nodes || [];
+
+    return threads
+      .filter((t: any) => !t.isResolved)
+      .map((t: any) => ({
+        id: t.id,
+        path: t.path || "",
+        line: t.line || 0,
+        startLine: t.startLine || null,
+        comments: (t.comments?.nodes || []).map((c: any) => ({
+          body: cleanCommentBody(c.body || ""),
+          author: c.author?.login || "unknown",
+          createdAt: c.createdAt || "",
+        })),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Resolve a PR review thread via GraphQL mutation.
+ */
+export async function resolveThread(threadId: string): Promise<boolean> {
+  try {
+    await $`gh api graphql -f query=${'mutation { resolveReviewThread(input: { threadId: "' + threadId + '" }) { thread { id isResolved } } }'}`.text();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function formatPrStatus(pr: PrStatus): string {
