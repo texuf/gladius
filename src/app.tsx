@@ -6,7 +6,6 @@ import { ProjectSelection } from "./views/ProjectSelection.js";
 import { TaskList } from "./views/TaskList.js";
 import { TaskView } from "./views/TaskView.js";
 import { TaskSwitcher } from "./views/TaskSwitcher.js";
-import { ConfirmModal } from "./components/ConfirmModal.js";
 import { HotkeyHints } from "./components/HotkeyHints.js";
 import { hasModifier } from "./utils/keyboard.js";
 import type { ViewState } from "./store/types.js";
@@ -49,6 +48,9 @@ export function App() {
     // Restore the actual saved view (projects, tasks, or taskView)
     // Fall back to tasks if we were on taskView but the task no longer exists
     if (savedView === "taskView" && !useStore.getState().activeTask) {
+      useStore.getState().setView("tasks");
+    } else if (savedView === "taskSwitcher") {
+      // Don't restore into the switcher — go to tasks instead
       useStore.getState().setView("tasks");
     } else {
       useStore.getState().setView(savedView || "tasks");
@@ -113,11 +115,11 @@ export function App() {
     // "/" — Open Task Switcher (works in any terminal)
     // Cmd+Shift+P — Open Task Switcher (Kitty protocol)
     if (input === "/" && !mod) {
-      setModal({ type: "taskSwitcher" });
+      setView("taskSwitcher");
       return;
     }
     if (input === "P" && key.super) {
-      setModal({ type: "taskSwitcher" });
+      setView("taskSwitcher");
       return;
     }
   });
@@ -130,6 +132,8 @@ export function App() {
         return <TaskList />;
       case "taskView":
         return <TaskView />;
+      case "taskSwitcher":
+        return <TaskSwitcher />;
       default:
         return <ProjectSelection />;
     }
@@ -137,7 +141,7 @@ export function App() {
 
   return (
     <Box flexDirection="column" width="100%" height="100%">
-      {modal?.type === "taskSwitcher" ? <TaskSwitcher /> : renderView()}
+      {renderView()}
       <HotkeyHints />
     </Box>
   );

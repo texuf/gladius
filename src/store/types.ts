@@ -49,13 +49,12 @@ export interface GitStatus {
   pr: PrStatus | null;
 }
 
-export type ViewState = "projects" | "tasks" | "taskView";
+export type ViewState = "projects" | "tasks" | "taskView" | "taskSwitcher";
 
 export type FocusPane = "none" | "notes" | "terminal" | "console";
 
 export type ModalState =
   | { type: "newTask" }
-  | { type: "taskSwitcher" }
   | { type: "confirm"; message: string; onConfirm: () => void }
   | null;
 

@@ -5,6 +5,7 @@ import { useStore } from "../store/index.js";
 import { getAllActiveTasks, getTasksForProject, touchTask, touchProject } from "../services/db.js";
 import { getAllProjects } from "../services/db.js";
 import type { Task, Project } from "../store/types.js";
+import { StatusDots } from "../components/StatusDots.js";
 
 interface TaskWithProject extends Task {
   projectName: string;
@@ -14,12 +15,12 @@ interface TaskWithProject extends Task {
 export function TaskSwitcher() {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const setModal = useStore((s) => s.setModal);
   const activeProject = useStore((s) => s.activeProject);
   const setActiveProject = useStore((s) => s.setActiveProject);
   const setActiveTask = useStore((s) => s.setActiveTask);
   const setView = useStore((s) => s.setView);
   const setTasks = useStore((s) => s.setTasks);
+  const taskStatuses = useStore((s) => s.taskStatuses);
 
   const [allTasks, setAllTasks] = useState<TaskWithProject[]>([]);
 
@@ -62,7 +63,7 @@ export function TaskSwitcher() {
 
   useInput((input, key) => {
     if (key.escape) {
-      setModal(null);
+      setView("tasks");
       return;
     }
 
@@ -88,7 +89,6 @@ export function TaskSwitcher() {
 
       setActiveTask(task);
       setView("taskView");
-      setModal(null);
     }
   });
 
@@ -135,8 +135,18 @@ export function TaskSwitcher() {
           </Text>
           {currentProjectTasks.map((task) => {
             const idx = globalIdx++;
+            const taskColor = taskStatuses[task.id];
             return (
               <Box key={task.id} paddingLeft={1}>
+                {taskColor && taskColor !== "none" ? (
+                  <StatusDots
+                    green={taskColor === "green" ? 1 : 0}
+                    red={taskColor === "red" ? 1 : 0}
+                    orange={taskColor === "orange" ? 1 : 0}
+                  />
+                ) : (
+                  <Text> </Text>
+                )}
                 <Text
                   color={idx === selectedIndex ? "magenta" : undefined}
                   bold={idx === selectedIndex}
@@ -159,8 +169,18 @@ export function TaskSwitcher() {
           <Text dimColor>Other Projects:</Text>
           {otherProjectTasks.map((task) => {
             const idx = globalIdx++;
+            const taskColor = taskStatuses[task.id];
             return (
               <Box key={task.id} paddingLeft={1}>
+                {taskColor && taskColor !== "none" ? (
+                  <StatusDots
+                    green={taskColor === "green" ? 1 : 0}
+                    red={taskColor === "red" ? 1 : 0}
+                    orange={taskColor === "orange" ? 1 : 0}
+                  />
+                ) : (
+                  <Text> </Text>
+                )}
                 <Text
                   color={idx === selectedIndex ? "magenta" : undefined}
                   bold={idx === selectedIndex}
