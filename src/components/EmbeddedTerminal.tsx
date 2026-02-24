@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import { Terminal } from "@xterm/headless";
 import { execSync } from "child_process";
 import { getOrCreateSession } from "../services/terminalManager.js";
+import { useStore } from "../store/index.js";
 
 interface EmbeddedTerminalProps {
   taskId: string;
@@ -128,10 +129,22 @@ export function EmbeddedTerminal({ taskId, cwd, command, focused = true, rows: p
   const renderIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const focusedRef = useRef(focused);
+  const procRef = useRef<any>(null);
+  const pendingInputRef = useRef<string[]>([]);
+  const paneType = taskId.endsWith("-console") ? "console" : "terminal";
 
-  // Keep focusedRef in sync
+  // Keep focusedRef in sync and flush any buffered input
   useEffect(() => {
     focusedRef.current = focused;
+    if (focused && pendingInputRef.current.length > 0 && procRef.current) {
+      for (const data of pendingInputRef.current) {
+        try { procRef.current.terminal!.write(data); } catch {}
+      }
+      pendingInputRef.current = [];
+    }
+    if (!focused) {
+      pendingInputRef.current = [];
+    }
   }, [focused]);
 
   // Attach to (or create) persistent session; detach on unmount
@@ -148,6 +161,7 @@ export function EmbeddedTerminal({ taskId, cwd, command, focused = true, rows: p
     }
 
     const { proc, xterm } = session;
+    procRef.current = proc;
 
     // Resize to match current dimensions if they changed
     if (session.cols !== cols || session.rows !== rows) {
@@ -168,7 +182,15 @@ export function EmbeddedTerminal({ taskId, cwd, command, focused = true, rows: p
     let firstEscTime = 0;
 
     const onStdinData = (data: Buffer | string) => {
-      if (!focusedRef.current) return;
+      if (!focusedRef.current) {
+        // React hasn't re-rendered yet — check the store directly
+        // (Zustand set() is synchronous, so focusPane reflects the true state)
+        if (useStore.getState().focusPane === paneType) {
+          const str = typeof data === "string" ? data : data.toString();
+          pendingInputRef.current.push(str);
+        }
+        return;
+      }
 
       const str = typeof data === "string" ? data : data.toString();
       const firstByte = typeof data === "string" ? data.charCodeAt(0) : data[0];
