@@ -177,12 +177,13 @@ export function ProjectSelection() {
       )}
 
       {projects.map((project, i) => {
-        const dots = { green: 0, red: 0, orange: 0 };
+        const dots = { green: 0, red: 0, orange: 0, yellow: 0 };
         for (const tid of projectTaskIds[project.id] || []) {
           const c = taskStatuses[tid];
           if (c === "green") dots.green++;
           else if (c === "red") dots.red++;
           else if (c === "orange") dots.orange++;
+          else if (c === "yellow") dots.yellow++;
         }
         return (
         <Box key={project.id} paddingLeft={1} justifyContent="space-between">

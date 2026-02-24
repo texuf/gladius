@@ -19,6 +19,8 @@ export function TaskView() {
   const chordBuffer = useStore((s) => s.chordBuffer);
   const setChordBuffer = useStore((s) => s.setChordBuffer);
   const escCooldownRef = useRef(0);
+  const lastUnfocusRef = useRef(0);
+  const prevFocusPaneRef = useRef(focusPane);
   const gitIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const setView = useStore((s) => s.setView);
@@ -29,6 +31,14 @@ export function TaskView() {
   const setGitStatus = useStore((s) => s.setGitStatus);
   const taskStatuses = useStore((s) => s.taskStatuses);
   const [fetching, setFetching] = useState(false);
+
+  // Track when focusPane transitions to "none" (covers both useInput and raw stdin onEsc)
+  useEffect(() => {
+    if (prevFocusPaneRef.current !== "none" && focusPane === "none") {
+      lastUnfocusRef.current = Date.now();
+    }
+    prevFocusPaneRef.current = focusPane;
+  }, [focusPane]);
 
   // Poll git status (fast) and PR status (slower, separate)
   const pollGit = () => {
@@ -80,10 +90,12 @@ export function TaskView() {
 
     // Esc when nothing is focused → go back to task list
     // Guard: double-check store directly in case React subscription is stale
-    // (EmbeddedTerminal's raw stdin handler may have already set focusPane to "none")
+    // (EmbeddedTerminal's raw stdin handler may have already set focusPane to "none"
+    //  before useInput fires, so we also check lastUnfocusTime)
     if (key.escape) {
       if (useStore.getState().focusPane !== "none") return;
-      if (Date.now() - escCooldownRef.current < 100) return;
+      if (Date.now() - escCooldownRef.current < 150) return;
+      if (Date.now() - lastUnfocusRef.current < 150) return;
       setView("tasks");
       return;
     }
@@ -176,12 +188,13 @@ export function TaskView() {
   const gitStatus = gitStatuses[activeTask.id];
 
   // Aggregate status dots for OTHER tasks
-  const otherDots = { green: 0, red: 0, orange: 0 };
+  const otherDots = { green: 0, red: 0, orange: 0, yellow: 0 };
   for (const [taskId, color] of Object.entries(taskStatuses)) {
     if (taskId === activeTask.id) continue;
     if (color === "green") otherDots.green++;
     else if (color === "red") otherDots.red++;
     else if (color === "orange") otherDots.orange++;
+    else if (color === "yellow") otherDots.yellow++;
   }
 
   return (
@@ -202,6 +215,7 @@ export function TaskView() {
               {gitStatus?.pr && (
                 <Text color={
                   gitStatus.pr.ciFailed > 0 || gitStatus.pr.unresolvedThreads > 0 ? "red"
+                    : gitStatus.pr.ciPending > 0 ? "yellow"
                     : gitStatus.pr.state === "merged" ? "magenta"
                     : "green"
                 }>

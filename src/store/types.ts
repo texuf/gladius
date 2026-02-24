@@ -36,9 +36,10 @@ export interface PrStatus {
   unresolvedThreads: number;
   ciPassed: number;
   ciFailed: number;
+  ciPending: number;
 }
 
-export type TaskStatusColor = "green" | "red" | "orange" | "none";
+export type TaskStatusColor = "green" | "red" | "orange" | "yellow" | "none";
 
 export interface GitStatus {
   branch: string;

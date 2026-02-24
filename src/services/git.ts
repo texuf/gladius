@@ -69,6 +69,7 @@ async function getPrStatus(repoPath: string, branch: string): Promise<PrStatus |
     const checks = Array.isArray(data.statusCheckRollup) ? data.statusCheckRollup : [];
     const ciFailed = checks.filter((c: any) => c.conclusion === "FAILURE").length;
     const ciPassed = checks.filter((c: any) => c.conclusion === "SUCCESS").length;
+    const ciPending = checks.filter((c: any) => !c.conclusion || c.conclusion === "PENDING" || c.status === "IN_PROGRESS" || c.status === "QUEUED").length;
 
     // Unresolved review threads via GraphQL
     let unresolvedThreads = 0;
@@ -90,6 +91,7 @@ async function getPrStatus(repoPath: string, branch: string): Promise<PrStatus |
       unresolvedThreads,
       ciPassed,
       ciFailed,
+      ciPending,
     };
   } catch {
     return null;
@@ -343,9 +345,15 @@ export async function getCiFailures(repoPath: string, branch?: string): Promise<
 export function formatPrStatus(pr: PrStatus): string {
   const state = pr.state === "open" ? "OPEN" : pr.state === "merged" ? "MERGED" : "CLOSED";
   const parts = [`PR #${pr.number} ${state}`];
-  const total = pr.ciPassed + pr.ciFailed;
+  const total = pr.ciPassed + pr.ciFailed + pr.ciPending;
   if (total > 0) {
-    parts.push(pr.ciFailed > 0 ? `CI ${pr.ciPassed}/${total}` : `CI ✓`);
+    if (pr.ciFailed > 0) {
+      parts.push(`CI ${pr.ciPassed}/${total}`);
+    } else if (pr.ciPending > 0) {
+      parts.push(`CI ${pr.ciPassed}/${total}...`);
+    } else {
+      parts.push(`CI ✓`);
+    }
   }
   if (pr.unresolvedThreads > 0) {
     parts.push(`${pr.unresolvedThreads} unresolved`);

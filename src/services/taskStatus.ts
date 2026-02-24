@@ -58,6 +58,7 @@ export async function computeTaskStatus(
       const gitStatus = await getGitStatusWithPr(worktreePath, branchName || undefined);
       if (gitStatus.pr) {
         if (gitStatus.pr.unresolvedThreads > 0 || gitStatus.pr.ciFailed > 0) return "red";
+        if (gitStatus.pr.ciPending > 0) return "yellow";
         if (gitStatus.pr.state === "open" && gitStatus.pr.ciFailed === 0 && gitStatus.pr.unresolvedThreads === 0) return "green";
       }
     } catch {}

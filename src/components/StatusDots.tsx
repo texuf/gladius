@@ -5,9 +5,10 @@ interface StatusDotsProps {
   green?: number;
   red?: number;
   orange?: number;
+  yellow?: number;
 }
 
-export function StatusDots({ green = 0, red = 0, orange = 0 }: StatusDotsProps) {
+export function StatusDots({ green = 0, red = 0, orange = 0, yellow = 0 }: StatusDotsProps) {
   const parts: React.ReactNode[] = [];
 
   if (green > 0) {
@@ -24,9 +25,16 @@ export function StatusDots({ green = 0, red = 0, orange = 0 }: StatusDotsProps) 
       </Text>
     );
   }
+  if (yellow > 0) {
+    parts.push(
+      <Text key="yellow" color="yellow">
+        {"●".repeat(yellow)}
+      </Text>
+    );
+  }
   if (orange > 0) {
     parts.push(
-      <Text key="orange" color="yellow">
+      <Text key="orange" color="#FF8800">
         {"●".repeat(orange)}
       </Text>
     );
