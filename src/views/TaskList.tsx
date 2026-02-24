@@ -16,7 +16,8 @@ import { deleteWorktree } from "../services/worktree.js";
 import { BRANCH_PREFIX } from "../utils/constants.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { TextInputField } from "../components/TextInput.js";
-import type { GitStatus, Task } from "../store/types.js";
+import { StatusDots } from "../components/StatusDots.js";
+import type { GitStatus, Task, TaskStatusColor } from "../store/types.js";
 
 export function TaskList() {
   const activeProject = useStore((s) => s.activeProject);
@@ -30,6 +31,7 @@ export function TaskList() {
   const setModal = useStore((s) => s.setModal);
   const gitStatuses = useStore((s) => s.gitStatuses);
   const setGitStatus = useStore((s) => s.setGitStatus);
+  const taskStatuses = useStore((s) => s.taskStatuses);
 
   const [newTaskDesc, setNewTaskDesc] = useState("");
   const [creating, setCreating] = useState(false);
@@ -170,6 +172,15 @@ export function TaskList() {
         <Text bold color="cyan">
           {activeProject.name}
         </Text>
+        {(() => {
+          const dots = { green: 0, red: 0, orange: 0 };
+          for (const color of Object.values(taskStatuses)) {
+            if (color === "green") dots.green++;
+            else if (color === "red") dots.red++;
+            else if (color === "orange") dots.orange++;
+          }
+          return <StatusDots {...dots} />;
+        })()}
       </Box>
 
       <Box justifyContent="space-between" marginBottom={1}>
@@ -185,9 +196,10 @@ export function TaskList() {
         const isSelected = i === selectedIndex;
         const isClosed = task.status === "closed";
         const status = gitStatuses[task.id];
+        const taskColor = taskStatuses[task.id];
         return (
           <Box key={task.id} flexDirection="column" paddingLeft={1} marginBottom={1}>
-            <Box>
+            <Box justifyContent="space-between">
               <Text
                 color={isSelected ? "cyan" : undefined}
                 bold={isSelected}
@@ -197,6 +209,13 @@ export function TaskList() {
                 {isClosed ? "[closed] " : ""}
                 {task.label}
               </Text>
+              {!isClosed && taskColor && taskColor !== "none" && (
+                <StatusDots
+                  green={taskColor === "green" ? 1 : 0}
+                  red={taskColor === "red" ? 1 : 0}
+                  orange={taskColor === "orange" ? 1 : 0}
+                />
+              )}
             </Box>
             <Box paddingLeft={4}>
               <Text dimColor>

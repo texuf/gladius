@@ -43,9 +43,17 @@ export async function getGitStatus(repoPath: string, branchName?: string): Promi
     // Not a git repo
   }
 
-  const pr = await getPrStatus(repoPath, branch);
+  return { branch, ahead, behind, behindMain, changedFiles, pr: null };
+}
 
-  return { branch, ahead, behind, behindMain, changedFiles, pr };
+/**
+ * Get git status + PR status together. PR fetch is separate so a slow/failing
+ * gh call doesn't block the core git status.
+ */
+export async function getGitStatusWithPr(repoPath: string, branchName?: string): Promise<GitStatus> {
+  const status = await getGitStatus(repoPath, branchName);
+  status.pr = await getPrStatus(repoPath, status.branch);
+  return status;
 }
 
 /**
@@ -53,17 +61,21 @@ export async function getGitStatus(repoPath: string, branchName?: string): Promi
  */
 async function getPrStatus(repoPath: string, branch: string): Promise<PrStatus | null> {
   try {
-    const json = await $`gh pr view ${branch} --repo $(git -C ${repoPath} remote get-url origin) --json number,state,comments,reviewDecision,reviews`.text();
+    const remoteUrl = (await $`git -C ${repoPath} remote get-url origin`.text()).trim();
+    const json = await $`gh pr view ${branch} --repo ${remoteUrl} --json number,state,comments,reviews,statusCheckRollup`.text();
     const data = JSON.parse(json);
-    // Count unresolved review comments (comments on code)
     const reviewComments = Array.isArray(data.reviews)
       ? data.reviews.filter((r: any) => r.state === "COMMENTED" || r.state === "CHANGES_REQUESTED").length
       : 0;
+    // CI passing = all checks succeeded (or no checks)
+    const checks = Array.isArray(data.statusCheckRollup) ? data.statusCheckRollup : [];
+    const ciPassing = checks.length === 0 || checks.every((c: any) => c.conclusion === "SUCCESS");
     return {
       number: data.number,
       state: data.state === "MERGED" ? "merged" : data.state === "CLOSED" ? "closed" : "open",
       comments: Array.isArray(data.comments) ? data.comments.length : 0,
       reviewComments,
+      ciPassing,
     };
   } catch {
     return null;

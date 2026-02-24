@@ -5,10 +5,11 @@ import { NotesPane } from "../components/NotesPane.js";
 import { TerminalPane } from "../components/TerminalPane.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { processChord } from "../utils/keyboard.js";
-import { formatGitStatus, formatPrStatus, getGitStatus } from "../services/git.js";
+import { formatGitStatus, formatPrStatus, getGitStatus, getGitStatusWithPr } from "../services/git.js";
 import { closeTask as dbCloseTask, updateTask, getTasksForProject } from "../services/db.js";
 import { deleteWorktree } from "../services/worktree.js";
 import { destroySession } from "../services/terminalManager.js";
+import { StatusDots } from "../components/StatusDots.js";
 
 export function TaskView() {
   const activeTask = useStore((s) => s.activeTask);
@@ -23,18 +24,31 @@ export function TaskView() {
   const setModal = useStore((s) => s.setModal);
   const gitStatuses = useStore((s) => s.gitStatuses);
   const setGitStatus = useStore((s) => s.setGitStatus);
+  const taskStatuses = useStore((s) => s.taskStatuses);
 
-  // Poll git status
+  // Poll git status (fast) and PR status (slower, separate)
   useEffect(() => {
     if (!activeTask?.worktree_path) return;
-    const poll = () => {
+    const pollGit = () => {
       getGitStatus(activeTask.worktree_path!, activeTask.branch_name || undefined).then(
+        (status) => {
+          // Preserve existing PR data from the slower PR poll
+          const existing = useStore.getState().gitStatuses[activeTask.id];
+          if (existing?.pr) status.pr = existing.pr;
+          setGitStatus(activeTask.id, status);
+        }
+      );
+    };
+    const pollPr = () => {
+      getGitStatusWithPr(activeTask.worktree_path!, activeTask.branch_name || undefined).then(
         (status) => setGitStatus(activeTask.id, status)
       );
     };
-    poll();
-    const interval = setInterval(poll, 5000);
-    return () => clearInterval(interval);
+    pollGit();
+    pollPr();
+    const gitInterval = setInterval(pollGit, 5000);
+    const prInterval = setInterval(pollPr, 30000);
+    return () => { clearInterval(gitInterval); clearInterval(prInterval); };
   }, [activeTask?.id]);
 
   useInput((input, key) => {
@@ -120,10 +134,19 @@ export function TaskView() {
 
   const gitStatus = gitStatuses[activeTask.id];
 
+  // Aggregate status dots for OTHER tasks
+  const otherDots = { green: 0, red: 0, orange: 0 };
+  for (const [taskId, color] of Object.entries(taskStatuses)) {
+    if (taskId === activeTask.id) continue;
+    if (color === "green") otherDots.green++;
+    else if (color === "red") otherDots.red++;
+    else if (color === "orange") otherDots.orange++;
+  }
+
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={1}>
       {/* Header */}
-      <Box justifyContent="space-between" marginBottom={0}>
+      <Box justifyContent="space-between" marginBottom={1}>
         <Box>
           <Text bold color="cyan">
             {activeTask.label}
@@ -131,21 +154,21 @@ export function TaskView() {
           {gitStatus && (
             <Text dimColor> {formatGitStatus(gitStatus)}</Text>
           )}
+          {gitStatus?.pr && (
+            <Text color={gitStatus.pr.state === "open" ? "green" : gitStatus.pr.state === "merged" ? "magenta" : "red"}>
+              {" "}{formatPrStatus(gitStatus.pr)}
+            </Text>
+          )}
         </Box>
-        {!activeTask.model && (
-          <Text dimColor color="yellow">
-            cl: Claude  co: Codex
-          </Text>
-        )}
+        <Box gap={1}>
+          <StatusDots {...otherDots} />
+          {!activeTask.model && (
+            <Text dimColor color="yellow">
+              cl: Claude  co: Codex
+            </Text>
+          )}
+        </Box>
       </Box>
-      {gitStatus?.pr && (
-        <Box marginBottom={1}>
-          <Text color={gitStatus.pr.state === "open" ? "green" : gitStatus.pr.state === "merged" ? "magenta" : "red"}>
-            {formatPrStatus(gitStatus.pr)}
-          </Text>
-        </Box>
-      )}
-      {!gitStatus?.pr && <Box marginBottom={1} />}
 
       {/* Notes Pane (20%) */}
       <NotesPane />

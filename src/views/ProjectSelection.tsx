@@ -20,8 +20,10 @@ export function ProjectSelection() {
   const setAddingProject = useStore((s) => s.setAddingProject);
   const setTasks = useStore((s) => s.setTasks);
 
+  const taskStatuses = useStore((s) => s.taskStatuses);
   const [error, setError] = useState("");
   const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
+  const [projectTaskIds, setProjectTaskIds] = useState<Record<string, string[]>>({});
   const [confirmDelete, setConfirmDelete] = useState<Project | null>(null);
   const [terminalActive, setTerminalActive] = useState(false);
   const [capturedPath, setCapturedPath] = useState("");
@@ -31,12 +33,16 @@ export function ProjectSelection() {
   useEffect(() => {
     const loaded = getAllProjects();
     setProjects(loaded);
-    // Load task counts
+    // Load task counts and task IDs per project
     const counts: Record<string, number> = {};
+    const taskIds: Record<string, string[]> = {};
     for (const p of loaded) {
-      counts[p.id] = getTasksForProject(p.id).filter((t) => t.status === "active").length;
+      const active = getTasksForProject(p.id).filter((t) => t.status === "active");
+      counts[p.id] = active.length;
+      taskIds[p.id] = active.map((t) => t.id);
     }
     setTaskCounts(counts);
+    setProjectTaskIds(taskIds);
   }, []);
 
   // When addingProject becomes true, open terminal
@@ -170,21 +176,33 @@ export function ProjectSelection() {
         <Text dimColor>No projects added. Press Ctrl+N to add one.</Text>
       )}
 
-      {projects.map((project, i) => (
-        <Box key={project.id} paddingLeft={1}>
-          <Text
-            color={i === selectedIndex ? "cyan" : undefined}
-            bold={i === selectedIndex}
-          >
-            {i === selectedIndex ? "▸ " : "  "}
-            {project.name}
-          </Text>
-          <Text dimColor>
-            {"  "}
-            {taskCounts[project.id] || 0} task{(taskCounts[project.id] || 0) !== 1 ? "s" : ""}
-          </Text>
+      {projects.map((project, i) => {
+        const dots = { green: 0, red: 0, orange: 0 };
+        for (const tid of projectTaskIds[project.id] || []) {
+          const c = taskStatuses[tid];
+          if (c === "green") dots.green++;
+          else if (c === "red") dots.red++;
+          else if (c === "orange") dots.orange++;
+        }
+        return (
+        <Box key={project.id} paddingLeft={1} justifyContent="space-between">
+          <Box>
+            <Text
+              color={i === selectedIndex ? "cyan" : undefined}
+              bold={i === selectedIndex}
+            >
+              {i === selectedIndex ? "▸ " : "  "}
+              {project.name}
+            </Text>
+            <Text dimColor>
+              {"  "}
+              {taskCounts[project.id] || 0} task{(taskCounts[project.id] || 0) !== 1 ? "s" : ""}
+            </Text>
+          </Box>
+          <StatusDots {...dots} />
         </Box>
-      ))}
+        );
+      })}
 
       {confirmDelete && (
         <ConfirmModal

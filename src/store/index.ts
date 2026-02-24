@@ -23,6 +23,7 @@ export const useStore = create<AppState>((set) => ({
   projects: [],
   tasks: [],
   gitStatuses: {},
+  taskStatuses: {},
 
   // Actions
   setView: (view) => {
@@ -48,4 +49,5 @@ export const useStore = create<AppState>((set) => ({
     set((state) => ({
       gitStatuses: { ...state.gitStatuses, [taskId]: status },
     })),
+  setTaskStatuses: (taskStatuses) => set({ taskStatuses }),
 }));

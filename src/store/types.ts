@@ -35,7 +35,10 @@ export interface PrStatus {
   state: "open" | "closed" | "merged";
   comments: number;
   reviewComments: number;
+  ciPassing: boolean;
 }
+
+export type TaskStatusColor = "green" | "red" | "orange" | "none";
 
 export interface GitStatus {
   branch: string;
@@ -77,6 +80,7 @@ export interface AppState {
   projects: Project[];
   tasks: Task[];
   gitStatuses: Record<string, GitStatus>;
+  taskStatuses: Record<string, TaskStatusColor>;
 
   // Actions
   setView: (view: ViewState) => void;
@@ -90,4 +94,5 @@ export interface AppState {
   setProjects: (projects: Project[]) => void;
   setTasks: (tasks: Task[]) => void;
   setGitStatus: (taskId: string, status: GitStatus) => void;
+  setTaskStatuses: (statuses: Record<string, TaskStatusColor>) => void;
 }

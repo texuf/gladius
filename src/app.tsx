@@ -9,6 +9,7 @@ import { TaskSwitcher } from "./views/TaskSwitcher.js";
 import { ConfirmModal } from "./components/ConfirmModal.js";
 import { HotkeyHints } from "./components/HotkeyHints.js";
 import { hasModifier } from "./utils/keyboard.js";
+import { computeAllTaskStatuses } from "./services/taskStatus.js";
 
 export function App() {
   const { exit } = useApp();
@@ -47,6 +48,18 @@ export function App() {
     }
 
     useStore.getState().setView("tasks");
+  }, []);
+
+  // Poll task statuses globally (LLM activity + PR status)
+  useEffect(() => {
+    const poll = () => {
+      computeAllTaskStatuses().then((statuses) => {
+        useStore.getState().setTaskStatuses(statuses);
+      });
+    };
+    poll();
+    const interval = setInterval(poll, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   useInput((input, key) => {
