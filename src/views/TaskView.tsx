@@ -46,7 +46,7 @@ export function TaskView() {
 
   const pollGit = () => {
     if (!activeTask?.worktree_path) return Promise.resolve();
-    return getGitStatus(activeTask.worktree_path, activeTask.branch_name || undefined).then(
+    return getGitStatus(activeTask.worktree_path).then(
       (status) => {
         // Merge git fields atomically, preserving whatever PR data exists
         useStore.setState((state) => ({
@@ -65,7 +65,7 @@ export function TaskView() {
     if (!activeTask?.worktree_path) return Promise.resolve();
     if (prInFlightRef.current) return Promise.resolve();
     prInFlightRef.current = true;
-    return getGitStatusWithPr(activeTask.worktree_path, activeTask.branch_name || undefined).then(
+    return getGitStatusWithPr(activeTask.worktree_path).then(
       (status) => {
         setGitStatus(activeTask.id, status);
         // Stop polling once checks are settled (nothing pending)

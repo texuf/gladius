@@ -60,7 +60,7 @@ export function PrComments() {
       setLoadingCi(false);
       return;
     }
-    const branch = activeTask.branch_name || undefined;
+    const branch = undefined; // detect from worktree's checked-out branch
     getPrComments(activeTask.worktree_path, branch).then((result) => {
       setThreads(result);
       setLoadingComments(false);
@@ -79,7 +79,7 @@ export function PrComments() {
 
   const refreshPr = () => {
     if (!activeTask?.worktree_path) return;
-    getGitStatusWithPr(activeTask.worktree_path, activeTask.branch_name || undefined).then(
+    getGitStatusWithPr(activeTask.worktree_path).then(
       (status) => setGitStatus(activeTask.id, status)
     );
   };

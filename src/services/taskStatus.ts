@@ -73,7 +73,7 @@ export async function computeTaskStatus(
   // Check PR status
   if (worktreePath) {
     try {
-      const gitStatus = await getGitStatusWithPr(worktreePath, branchName || undefined);
+      const gitStatus = await getGitStatusWithPr(worktreePath);
       if (gitStatus.pr) {
         if (gitStatus.pr.unresolvedThreads > 0 || gitStatus.pr.ciFailed > 0) return "red";
         if (gitStatus.pr.ciPending > 0) return "yellow";
