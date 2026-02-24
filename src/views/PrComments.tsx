@@ -101,10 +101,12 @@ export function PrComments() {
       if (selectedCi) {
         writeToSession(`${activeTask.id}-console`, formatCiFailureForPaste(selectedCi));
         setFocusPane("console");
+        useStore.getState().markConsoleInteracted(activeTask.id);
         goBack();
       } else if (selectedThread) {
         writeToSession(`${activeTask.id}-console`, formatThreadForPaste(selectedThread));
         setFocusPane("console");
+        useStore.getState().markConsoleInteracted(activeTask.id);
         goBack();
       }
       return;

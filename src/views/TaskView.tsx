@@ -113,6 +113,11 @@ export function TaskView() {
 
     if (input === "c" && !key.super && activeTask?.model) {
       setFocusPane("console");
+      useStore.getState().markConsoleInteracted(activeTask.id);
+      useStore.getState().setTaskStatuses({
+        ...useStore.getState().taskStatuses,
+        [activeTask.id]: "yellow",
+      });
       return;
     }
 
@@ -158,6 +163,11 @@ export function TaskView() {
           updateTask(activeTask.id, { model });
           setActiveTask({ ...activeTask, model });
           setFocusPane("console");
+          useStore.getState().markConsoleInteracted(activeTask.id);
+          useStore.getState().setTaskStatuses({
+            ...useStore.getState().taskStatuses,
+            [activeTask.id]: "yellow",
+          });
         }
       }
     }
@@ -187,14 +197,13 @@ export function TaskView() {
 
   const gitStatus = gitStatuses[activeTask.id];
 
-  // Aggregate status dots for OTHER tasks
-  const otherDots = { green: 0, red: 0, orange: 0, yellow: 0 };
-  for (const [taskId, color] of Object.entries(taskStatuses)) {
-    if (taskId === activeTask.id) continue;
-    if (color === "green") otherDots.green++;
-    else if (color === "red") otherDots.red++;
-    else if (color === "orange") otherDots.orange++;
-    else if (color === "yellow") otherDots.yellow++;
+  // Aggregate status dots for ALL tasks (including active)
+  const allDots = { green: 0, red: 0, orange: 0, yellow: 0 };
+  for (const [, color] of Object.entries(taskStatuses)) {
+    if (color === "green") allDots.green++;
+    else if (color === "red") allDots.red++;
+    else if (color === "orange") allDots.orange++;
+    else if (color === "yellow") allDots.yellow++;
   }
 
   return (
@@ -226,7 +235,7 @@ export function TaskView() {
           )}
         </Box>
         <Box gap={1}>
-          <StatusDots {...otherDots} />
+          <StatusDots {...allDots} />
           {!activeTask.model && (
             <Text dimColor color="yellow">
               cl: Claude  co: Codex

@@ -24,6 +24,7 @@ export const useStore = create<AppState>((set) => ({
   tasks: [],
   gitStatuses: {},
   taskStatuses: {},
+  consoleInteractedTasks: new Set<string>(),
 
   // Actions
   setView: (view) => {
@@ -50,4 +51,16 @@ export const useStore = create<AppState>((set) => ({
       gitStatuses: { ...state.gitStatuses, [taskId]: status },
     })),
   setTaskStatuses: (taskStatuses) => set({ taskStatuses }),
+  markConsoleInteracted: (taskId) =>
+    set((state) => {
+      const next = new Set(state.consoleInteractedTasks);
+      next.add(taskId);
+      return { consoleInteractedTasks: next };
+    }),
+  clearConsoleInteracted: (taskId) =>
+    set((state) => {
+      const next = new Set(state.consoleInteractedTasks);
+      next.delete(taskId);
+      return { consoleInteractedTasks: next };
+    }),
 }));
