@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
+import { $ } from "bun";
 import { useStore } from "../store/index.js";
 import { NotesPane } from "../components/NotesPane.js";
 import { TerminalPane } from "../components/TerminalPane.js";
@@ -41,21 +42,39 @@ export function TaskView() {
   }, [focusPane]);
 
   // Poll git status (fast) and PR status (slower, separate)
+  const prInFlightRef = useRef(false);
+
   const pollGit = () => {
     if (!activeTask?.worktree_path) return Promise.resolve();
     return getGitStatus(activeTask.worktree_path, activeTask.branch_name || undefined).then(
       (status) => {
-        const existing = useStore.getState().gitStatuses[activeTask.id];
-        if (existing?.pr) status.pr = existing.pr;
-        setGitStatus(activeTask.id, status);
+        // Merge git fields atomically, preserving whatever PR data exists
+        useStore.setState((state) => ({
+          gitStatuses: {
+            ...state.gitStatuses,
+            [activeTask.id]: {
+              ...status,
+              pr: state.gitStatuses[activeTask.id]?.pr ?? null,
+            },
+          },
+        }));
       }
     );
   };
   const pollPr = () => {
     if (!activeTask?.worktree_path) return Promise.resolve();
+    if (prInFlightRef.current) return Promise.resolve();
+    prInFlightRef.current = true;
     return getGitStatusWithPr(activeTask.worktree_path, activeTask.branch_name || undefined).then(
-      (status) => setGitStatus(activeTask.id, status)
-    );
+      (status) => {
+        setGitStatus(activeTask.id, status);
+        // Stop polling once checks are settled (nothing pending)
+        if (status.pr && status.pr.ciPending === 0 && prIntervalRef.current) {
+          clearInterval(prIntervalRef.current);
+          prIntervalRef.current = null;
+        }
+      }
+    ).finally(() => { prInFlightRef.current = false; });
   };
 
   const startPolling = () => {
@@ -126,12 +145,16 @@ export function TaskView() {
       setFetching(true);
       if (gitIntervalRef.current) clearInterval(gitIntervalRef.current);
       if (prIntervalRef.current) clearInterval(prIntervalRef.current);
-      const gitP = pollGit();
-      const prP = pollPr();
-      Promise.all([gitP, prP]).then(() => {
+      // Use pollPr only — it fetches full git status + PR in one call,
+      // avoiding the race where pollGit overwrites fresh PR data
+      pollPr().then(() => {
         setFetching(false);
         gitIntervalRef.current = setInterval(pollGit, 5000);
-        prIntervalRef.current = setInterval(pollPr, 30000);
+        // Only restart PR polling if checks are still pending
+        const pr = useStore.getState().gitStatuses[activeTask!.id]?.pr;
+        if (!pr || pr.ciPending > 0) {
+          prIntervalRef.current = setInterval(pollPr, 30000);
+        }
       });
       return;
     }
@@ -149,6 +172,19 @@ export function TaskView() {
     // View PR comments
     if (input === "v" && !key.super && activeTask?.worktree_path) {
       setView("prComments");
+      return;
+    }
+
+    // Squash merge PR
+    if (input === "s" && !key.super && activeTask?.worktree_path) {
+      const pr = gitStatuses[activeTask.id]?.pr;
+      if (pr && pr.state === "open" && pr.ciFailed === 0 && pr.ciPending === 0 && pr.unresolvedThreads === 0) {
+        setModal({
+          type: "confirm",
+          message: `Squash and merge PR #${pr.number}?`,
+          onConfirm: () => handleSquashMerge(pr.number),
+        });
+      }
       return;
     }
 
@@ -174,6 +210,19 @@ export function TaskView() {
   });
 
   const setTasks = useStore((s) => s.setTasks);
+
+  const handleSquashMerge = async (prNumber: number) => {
+    if (!activeTask?.worktree_path) return;
+    setModal(null);
+    setFetching(true);
+    try {
+      const remoteUrl = (await $`git -C ${activeTask.worktree_path} remote get-url origin`.text()).trim();
+      await $`gh pr merge ${prNumber} --squash --repo ${remoteUrl}`;
+      // Refresh PR status to show merged
+      await pollPr();
+    } catch {}
+    setFetching(false);
+  };
 
   const handleCloseTask = async () => {
     if (!activeTask || !activeProject) return;

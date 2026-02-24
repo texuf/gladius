@@ -69,6 +69,10 @@ export function PrComments() {
       setCiFailures(result);
       setLoadingCi(false);
     });
+    // Refresh cached PR status so the header/dots stay current
+    getGitStatusWithPr(activeTask.worktree_path, branch).then(
+      (status) => setGitStatus(activeTask.id, status)
+    );
   }, [activeTask?.id]);
 
   const goBack = () => setView("taskView");

@@ -65,11 +65,13 @@ async function getPrStatus(repoPath: string, branch: string): Promise<PrStatus |
     const json = await $`gh pr view ${branch} --repo ${remoteUrl} --json number,state,statusCheckRollup`.text();
     const data = JSON.parse(json);
 
-    // CI check counts
-    const checks = Array.isArray(data.statusCheckRollup) ? data.statusCheckRollup : [];
+    // CI check counts — filter out ghost entries with null name/status
+    const checks = Array.isArray(data.statusCheckRollup)
+      ? data.statusCheckRollup.filter((c: any) => c.name || c.status)
+      : [];
     const ciFailed = checks.filter((c: any) => c.conclusion === "FAILURE").length;
     const ciPassed = checks.filter((c: any) => c.conclusion === "SUCCESS").length;
-    const ciPending = checks.filter((c: any) => !c.conclusion || c.conclusion === "PENDING" || c.status === "IN_PROGRESS" || c.status === "QUEUED").length;
+    const ciPending = checks.filter((c: any) => c.conclusion !== "FAILURE" && c.conclusion !== "SUCCESS" && c.conclusion !== "SKIPPED").length;
 
     // Unresolved review threads via GraphQL
     let unresolvedThreads = 0;

@@ -53,12 +53,16 @@ export function HotkeyHints() {
         ? ["c Console"]
         : ["cl Claude", "co Codex"];
       const pr = activeTask && gitStatuses[activeTask.id]?.pr;
-      const prHints = pr ? ["v PR Issues"] : [];
+      const hasIssues = pr && (pr.unresolvedThreads > 0 || pr.ciFailed > 0 || pr.ciPending > 0);
+      const isGreen = pr && pr.state === "open" && pr.ciFailed === 0 && pr.ciPending === 0 && pr.unresolvedThreads === 0;
+      const prHints = hasIssues ? ["v PR Issues"] : [];
+      const mergeHints = isGreen ? ["s Squash Merge"] : [];
       hints.push(
         "i Notes",
         "t Terminal",
         ...modelHints,
         ...prHints,
+        ...mergeHints,
         "r Refresh",
         "Esc Back",
         "x Close"
