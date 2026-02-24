@@ -124,6 +124,7 @@ export function TerminalPane({ type, label, focusKey }: TerminalPaneProps) {
           cwd={activeTask!.worktree_path!}
           command={command}
           focused={isFocused}
+          singleEsc={type === "console"}
           rows={type === "terminal" ? dims!.ptyRows : consoleDims!.ptyRows}
           cols={type === "terminal" ? dims!.ptyCols : consoleDims!.ptyCols}
           onEsc={() => setFocusPane("none")}
@@ -138,7 +139,7 @@ export function TerminalPane({ type, label, focusKey }: TerminalPaneProps) {
           {isFocused ? (
             <Text dimColor>
               {placeholderText}
-              {"\n"}Press Esc×2 to unfocus
+              {"\n"}Press {type === "console" ? "Esc" : "Esc×2"} to unfocus
             </Text>
           ) : (
             <Text dimColor>Press {focusKey} to focus</Text>

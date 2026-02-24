@@ -59,7 +59,8 @@ export function HotkeyHints() {
         "x Close"
       );
     } else {
-      hints.push(`Esc×2 Unfocus (${focusPane})`);
+      const escHint = focusPane === "console" ? "Esc" : "Esc×2";
+      hints.push(`${escHint} Unfocus (${focusPane})`);
     }
   }
 

@@ -11,6 +11,7 @@ interface EmbeddedTerminalProps {
   focused?: boolean;
   rows?: number;
   cols?: number;
+  singleEsc?: boolean;
   onEsc?: (pid: number) => void;
   onError?: (message: string) => void;
 }
@@ -121,7 +122,7 @@ export function getCwd(pid: number): string {
 const DEFAULT_CHROME_ROWS = 7;
 const DEFAULT_CHROME_COLS = 4;
 
-export function EmbeddedTerminal({ taskId, cwd, command, focused = true, rows: propRows, cols: propCols, onEsc, onError }: EmbeddedTerminalProps) {
+export function EmbeddedTerminal({ taskId, cwd, command, focused = true, rows: propRows, cols: propCols, singleEsc = false, onEsc, onError }: EmbeddedTerminalProps) {
   const [lines, setLines] = useState<string[]>([]);
   const stdinListenerRef = useRef<((data: Buffer | string) => void) | null>(null);
   const renderIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -174,6 +175,12 @@ export function EmbeddedTerminal({ taskId, cwd, command, focused = true, rows: p
 
       // Check for bare Esc: single \x1b byte
       if (str.length === 1 && firstByte === 0x1b) {
+        // Console pane: single Esc immediately unfocuses (no forwarding)
+        if (singleEsc) {
+          onEsc?.(proc.pid);
+          return;
+        }
+
         const now = Date.now();
 
         // Second bare Esc within 300ms → unfocus
