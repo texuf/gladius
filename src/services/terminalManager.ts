@@ -56,6 +56,14 @@ function tmuxSessionExists(name: string): boolean {
 
 function createTmuxSession(name: string, cwd: string, cols: number, rows: number, command: string[]): void {
   ensureTmuxConf();
+  // Wrap command in a login shell so ~/.zshrc / ~/.zprofile are sourced
+  // (ensures PATH includes user-installed tools like protoc, buf, bun, go, etc.)
+  const shell = process.env.SHELL || "/bin/zsh";
+  const isLoginShell = command.length >= 2 && command[0] === shell && command[1] === "-l";
+  const wrappedCommand = isLoginShell
+    ? command
+    : [shell, "-lc", `exec ${command.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`];
+
   // Create detached session with specified size
   const args = [
     "-L", TMUX_SOCKET,
@@ -65,7 +73,7 @@ function createTmuxSession(name: string, cwd: string, cols: number, rows: number
     "-c", cwd,
     "-x", String(cols),
     "-y", String(rows),
-    "--", ...command,
+    "--", ...wrappedCommand,
   ];
   const result = spawnSync("tmux", args, {
     env: { ...process.env, TMUX: "" } as Record<string, string>, // allow nested tmux
