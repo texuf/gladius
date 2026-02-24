@@ -58,8 +58,10 @@ export function App() {
       return;
     }
 
-    // Don't process global shortcuts if a modal is open or text input is active
-    if (modal || addingProject) return;
+    // Don't process global shortcuts if a modal is open, text input is active,
+    // or a terminal/console pane is focused (only Esc handled there)
+    const focusPane = useStore.getState().focusPane;
+    if (modal || addingProject || focusPane !== "none") return;
 
     // Ctrl+O / Cmd+Shift+0 — Return to Project Selection
     if ((input === "o" && key.ctrl) || (input === ")" && key.super)) {
@@ -117,8 +119,7 @@ export function App() {
 
   return (
     <Box flexDirection="column" width="100%" height="100%">
-      {renderView()}
-      {modal?.type === "taskSwitcher" && <TaskSwitcher />}
+      {modal?.type === "taskSwitcher" ? <TaskSwitcher /> : renderView()}
       <HotkeyHints />
     </Box>
   );

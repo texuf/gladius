@@ -7,6 +7,7 @@ import { getOrCreateSession } from "../services/terminalManager.js";
 interface EmbeddedTerminalProps {
   taskId: string;
   cwd: string;
+  command?: string[];
   focused?: boolean;
   rows?: number;
   cols?: number;
@@ -120,7 +121,7 @@ export function getCwd(pid: number): string {
 const DEFAULT_CHROME_ROWS = 7;
 const DEFAULT_CHROME_COLS = 4;
 
-export function EmbeddedTerminal({ taskId, cwd, focused = true, rows: propRows, cols: propCols, onEsc, onError }: EmbeddedTerminalProps) {
+export function EmbeddedTerminal({ taskId, cwd, command, focused = true, rows: propRows, cols: propCols, onEsc, onError }: EmbeddedTerminalProps) {
   const [lines, setLines] = useState<string[]>([]);
   const stdinListenerRef = useRef<((data: Buffer | string) => void) | null>(null);
   const renderIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -139,7 +140,7 @@ export function EmbeddedTerminal({ taskId, cwd, focused = true, rows: propRows, 
 
     let session;
     try {
-      session = getOrCreateSession(taskId, cwd, cols, rows);
+      session = getOrCreateSession(taskId, cwd, cols, rows, command);
     } catch (e: any) {
       onError?.(`Failed to open terminal: ${e.message || e}`);
       return;
@@ -160,7 +161,11 @@ export function EmbeddedTerminal({ taskId, cwd, focused = true, rows: propRows, 
     // Render immediately from existing buffer
     setLines(bufferToAnsiLines(xterm));
 
-    // Raw stdin → PTY with Esc detection
+    // Raw stdin → PTY with double-Esc detection
+    // Single Esc → forwarded to PTY (e.g. vim insert→normal)
+    // Double Esc (two bare Esc within 300ms) → unfocus pane
+    let firstEscTime = 0;
+
     const onStdinData = (data: Buffer | string) => {
       if (!focusedRef.current) return;
 
@@ -169,9 +174,27 @@ export function EmbeddedTerminal({ taskId, cwd, focused = true, rows: propRows, 
 
       // Check for bare Esc: single \x1b byte
       if (str.length === 1 && firstByte === 0x1b) {
+        const now = Date.now();
+
+        // Second bare Esc within 300ms → unfocus
+        if (now - firstEscTime < 300) {
+          firstEscTime = 0;
+          if (escTimerRef.current) {
+            clearTimeout(escTimerRef.current);
+            escTimerRef.current = null;
+          }
+          onEsc?.(proc.pid);
+          return;
+        }
+
+        // First bare Esc → wait to see if it's a sequence or double-tap
+        firstEscTime = now;
         escTimerRef.current = setTimeout(() => {
           escTimerRef.current = null;
-          onEsc?.(proc.pid);
+          // Timed out — it was a single bare Esc, forward to PTY
+          try {
+            proc.terminal!.write("\x1b");
+          } catch {}
         }, 100);
         return;
       }

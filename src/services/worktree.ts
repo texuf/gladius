@@ -24,12 +24,18 @@ export async function createWorktree(
     mkdirSync(worktreeDir, { recursive: true });
   }
 
-  // Create worktree — reuse existing branch or create new one
+  // Fetch latest and resolve main branch
+  await $`git -C ${projectPath} fetch origin`.quiet().nothrow();
+  const mainBranch = await $`git -C ${projectPath} symbolic-ref refs/remotes/origin/HEAD`.quiet().text()
+    .then((ref) => ref.trim().replace("refs/remotes/origin/", ""))
+    .catch(() => "main");
+
+  // Create worktree — reuse existing branch or create new from origin/main
   const branchExists = await $`git -C ${projectPath} rev-parse --verify ${branchName}`.quiet().then(() => true, () => false);
   if (branchExists) {
     await $`git -C ${projectPath} worktree add ${worktreePath} ${branchName}`;
   } else {
-    await $`git -C ${projectPath} worktree add ${worktreePath} -b ${branchName}`;
+    await $`git -C ${projectPath} worktree add ${worktreePath} -b ${branchName} origin/${mainBranch}`;
   }
 
   // Copy .env files
@@ -43,7 +49,8 @@ export async function createWorktree(
  */
 export async function deleteWorktree(
   projectPath: string,
-  worktreePath: string
+  worktreePath: string,
+  branchName?: string | null
 ): Promise<void> {
   try {
     await $`git -C ${projectPath} worktree remove ${worktreePath} --force`;
@@ -54,6 +61,13 @@ export async function deleteWorktree(
     await $`git -C ${projectPath} worktree prune`;
   } catch {
     // Ignore prune errors
+  }
+  if (branchName) {
+    try {
+      await $`git -C ${projectPath} branch -D ${branchName}`;
+    } catch {
+      // Branch may already be gone
+    }
   }
 }
 

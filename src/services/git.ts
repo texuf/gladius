@@ -1,5 +1,5 @@
 import { $ } from "bun";
-import type { GitStatus } from "../store/types.js";
+import type { GitStatus, PrStatus } from "../store/types.js";
 
 /**
  * Get git status information for a given repo path.
@@ -43,7 +43,31 @@ export async function getGitStatus(repoPath: string, branchName?: string): Promi
     // Not a git repo
   }
 
-  return { branch, ahead, behind, behindMain, changedFiles };
+  const pr = await getPrStatus(repoPath, branch);
+
+  return { branch, ahead, behind, behindMain, changedFiles, pr };
+}
+
+/**
+ * Get PR status for a branch using gh CLI.
+ */
+async function getPrStatus(repoPath: string, branch: string): Promise<PrStatus | null> {
+  try {
+    const json = await $`gh pr view ${branch} --repo $(git -C ${repoPath} remote get-url origin) --json number,state,comments,reviewDecision,reviews`.text();
+    const data = JSON.parse(json);
+    // Count unresolved review comments (comments on code)
+    const reviewComments = Array.isArray(data.reviews)
+      ? data.reviews.filter((r: any) => r.state === "COMMENTED" || r.state === "CHANGES_REQUESTED").length
+      : 0;
+    return {
+      number: data.number,
+      state: data.state === "MERGED" ? "merged" : data.state === "CLOSED" ? "closed" : "open",
+      comments: Array.isArray(data.comments) ? data.comments.length : 0,
+      reviewComments,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function getCurrentBranch(repoPath: string): Promise<string> {
@@ -75,4 +99,11 @@ export function formatGitStatus(status: GitStatus): string {
   }
 
   return parts.join(" ");
+}
+
+export function formatPrStatus(pr: PrStatus): string {
+  const state = pr.state === "open" ? "OPEN" : pr.state === "merged" ? "MERGED" : "CLOSED";
+  const totalComments = pr.comments + pr.reviewComments;
+  const commentStr = totalComments > 0 ? ` ${totalComments} comment${totalComments !== 1 ? "s" : ""}` : "";
+  return `PR #${pr.number} ${state}${commentStr}`;
 }

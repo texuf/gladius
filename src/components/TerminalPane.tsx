@@ -1,7 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
 import { useStore } from "../store/index.js";
 import { EmbeddedTerminal } from "./EmbeddedTerminal.js";
+import { buildLlmCommand, watchForClaudeSessionId, watchForCodexSessionId } from "../services/sessionCapture.js";
+import { getSession } from "../services/terminalManager.js";
+import { updateTask } from "../services/db.js";
 
 interface TerminalPaneProps {
   type: "terminal" | "console";
@@ -28,20 +31,75 @@ function getTerminalDimensions() {
   return { paneRows, ptyRows, ptyCols };
 }
 
+function getConsoleDimensions() {
+  const totalRows = process.stdout.rows || 24;
+  const totalCols = process.stdout.columns || 80;
+  // Total minus: header(2) + notes(4) + terminal pane(13) + console chrome(3) + outer padding(2)
+  const ptyRows = Math.max(6, totalRows - 2 - 4 - 13 - PANE_CHROME_ROWS - 2);
+  const ptyCols = Math.max(40, totalCols - PANE_CHROME_COLS - 2);
+  return { ptyRows, ptyCols };
+}
+
 export function TerminalPane({ type, label, focusKey }: TerminalPaneProps) {
   const focusPane = useStore((s) => s.focusPane);
   const setFocusPane = useStore((s) => s.setFocusPane);
   const activeTask = useStore((s) => s.activeTask);
+  const setActiveTask = useStore((s) => s.setActiveTask);
   const isFocused = focusPane === type;
   const [termError, setTermError] = useState("");
+  const captureCleanupRef = useRef<(() => void) | null>(null);
 
   const modelLabel =
     type === "console" && activeTask?.model
       ? ` (${activeTask.model})`
       : "";
 
-  const hasWorktree = type === "terminal" && activeTask?.worktree_path;
-  const dims = hasWorktree ? getTerminalDimensions() : null;
+  const canEmbed = type === "terminal"
+    ? !!activeTask?.worktree_path
+    : !!(activeTask?.model && activeTask?.worktree_path);
+
+  const dims = canEmbed
+    ? (type === "terminal" ? getTerminalDimensions() : null)
+    : null;
+  const consoleDims = canEmbed && type === "console" ? getConsoleDimensions() : null;
+
+  const command = type === "console" && activeTask?.model
+    ? buildLlmCommand(activeTask.model, activeTask.session_id)
+    : undefined;
+
+  // Session ID capture for console pane
+  useEffect(() => {
+    if (type !== "console" || !canEmbed || !activeTask) return;
+
+    // Check if this is a new session that needs capture
+    const sessionKey = `${activeTask.id}-console`;
+    const session = getSession(sessionKey);
+    if (!session?.isNew) return;
+    // Already have a session_id, no need to capture
+    if (activeTask.session_id) return;
+
+    const onCapture = (sessionId: string) => {
+      updateTask(activeTask.id, { session_id: sessionId });
+      setActiveTask({ ...activeTask, session_id: sessionId });
+    };
+
+    if (activeTask.model === "claude") {
+      captureCleanupRef.current = watchForClaudeSessionId(activeTask.worktree_path!, onCapture);
+    } else if (activeTask.model === "codex") {
+      captureCleanupRef.current = watchForCodexSessionId(onCapture);
+    }
+
+    return () => {
+      captureCleanupRef.current?.();
+      captureCleanupRef.current = null;
+    };
+  }, [activeTask?.id, activeTask?.model, canEmbed]);
+
+  const placeholderText = type === "console"
+    ? (activeTask?.model
+      ? "[No worktree — create one first]"
+      : "Press cl (Claude) or co (Codex) to start")
+    : "[No worktree — create one first]";
 
   return (
     <Box
@@ -51,7 +109,7 @@ export function TerminalPane({ type, label, focusKey }: TerminalPaneProps) {
       paddingX={1}
       width="100%"
       flexGrow={type === "console" ? 1 : 0}
-      height={hasWorktree ? dims!.paneRows : type === "terminal" ? 5 : undefined}
+      height={canEmbed && type === "terminal" ? dims!.paneRows : type === "terminal" ? 5 : undefined}
     >
       <Box justifyContent="space-between">
         <Text bold color={isFocused ? "green" : undefined}>
@@ -60,13 +118,14 @@ export function TerminalPane({ type, label, focusKey }: TerminalPaneProps) {
         <Text dimColor>{focusKey}: focus</Text>
       </Box>
 
-      {hasWorktree && !termError ? (
+      {canEmbed && !termError ? (
         <EmbeddedTerminal
-          taskId={`${activeTask.id}-${type}`}
-          cwd={activeTask.worktree_path!}
+          taskId={`${activeTask!.id}-${type}`}
+          cwd={activeTask!.worktree_path!}
+          command={command}
           focused={isFocused}
-          rows={dims!.ptyRows}
-          cols={dims!.ptyCols}
+          rows={type === "terminal" ? dims!.ptyRows : consoleDims!.ptyRows}
+          cols={type === "terminal" ? dims!.ptyCols : consoleDims!.ptyCols}
           onEsc={() => setFocusPane("none")}
           onError={(msg) => setTermError(msg)}
         />
@@ -78,10 +137,8 @@ export function TerminalPane({ type, label, focusKey }: TerminalPaneProps) {
         <Box flexGrow={1} justifyContent="center" alignItems="center">
           {isFocused ? (
             <Text dimColor>
-              {type === "terminal"
-                ? "[No worktree — create one first]"
-                : "[Console placeholder — LLM integration in Phase 2]"}
-              {"\n"}Press Esc to unfocus
+              {placeholderText}
+              {"\n"}Press Esc×2 to unfocus
             </Text>
           ) : (
             <Text dimColor>Press {focusKey} to focus</Text>

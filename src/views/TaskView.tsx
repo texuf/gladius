@@ -5,7 +5,7 @@ import { NotesPane } from "../components/NotesPane.js";
 import { TerminalPane } from "../components/TerminalPane.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { processChord } from "../utils/keyboard.js";
-import { formatGitStatus, getGitStatus } from "../services/git.js";
+import { formatGitStatus, formatPrStatus, getGitStatus } from "../services/git.js";
 import { closeTask as dbCloseTask, updateTask, getTasksForProject } from "../services/db.js";
 import { deleteWorktree } from "../services/worktree.js";
 import { destroySession } from "../services/terminalManager.js";
@@ -100,10 +100,14 @@ export function TaskView() {
 
   const handleCloseTask = async () => {
     if (!activeTask || !activeProject) return;
+    // Persist session_id if captured during this session
+    if (activeTask.session_id) {
+      updateTask(activeTask.id, { session_id: activeTask.session_id });
+    }
     destroySession(`${activeTask.id}-terminal`);
     destroySession(`${activeTask.id}-console`);
     if (activeTask.worktree_path) {
-      await deleteWorktree(activeProject.path, activeTask.worktree_path);
+      await deleteWorktree(activeProject.path, activeTask.worktree_path, activeTask.branch_name);
     }
     dbCloseTask(activeTask.id);
     setTasks(getTasksForProject(activeProject.id));
@@ -119,7 +123,7 @@ export function TaskView() {
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={1}>
       {/* Header */}
-      <Box justifyContent="space-between" marginBottom={1}>
+      <Box justifyContent="space-between" marginBottom={0}>
         <Box>
           <Text bold color="cyan">
             {activeTask.label}
@@ -134,6 +138,14 @@ export function TaskView() {
           </Text>
         )}
       </Box>
+      {gitStatus?.pr && (
+        <Box marginBottom={1}>
+          <Text color={gitStatus.pr.state === "open" ? "green" : gitStatus.pr.state === "merged" ? "magenta" : "red"}>
+            {formatPrStatus(gitStatus.pr)}
+          </Text>
+        </Box>
+      )}
+      {!gitStatus?.pr && <Box marginBottom={1} />}
 
       {/* Notes Pane (20%) */}
       <NotesPane />

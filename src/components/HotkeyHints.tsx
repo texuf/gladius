@@ -16,6 +16,7 @@ function getPtyCount(): { used: number; max: number } {
 
 export function HotkeyHints() {
   const view = useStore((s) => s.view);
+  const modal = useStore((s) => s.modal);
   const focusPane = useStore((s) => s.focusPane);
   const activeTask = useStore((s) => s.activeTask);
   const addingProject = useStore((s) => s.addingProject);
@@ -30,7 +31,9 @@ export function HotkeyHints() {
 
   const hints: string[] = [];
 
-  if (view === "projects" && addingProject) {
+  if (modal?.type === "taskSwitcher") {
+    hints.push("↑↓ Navigate", "⏎ Switch", "Esc Cancel");
+  } else if (view === "projects" && addingProject) {
     hints.push("Esc Cancel");
   } else if (view === "projects") {
     hints.push("↑↓ Navigate", "⏎ Select", "Ctrl+N New Project", "d Delete");
@@ -57,7 +60,7 @@ export function HotkeyHints() {
         "x Close"
       );
     } else {
-      hints.push(`Esc Unfocus (${focusPane})`);
+      hints.push(`Esc×2 Unfocus (${focusPane})`);
     }
   }
 

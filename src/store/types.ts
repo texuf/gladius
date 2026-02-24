@@ -30,12 +30,20 @@ export interface TaskEvent {
   created_at: string;
 }
 
+export interface PrStatus {
+  number: number;
+  state: "open" | "closed" | "merged";
+  comments: number;
+  reviewComments: number;
+}
+
 export interface GitStatus {
   branch: string;
   ahead: number;
   behind: number;
   behindMain: number;
   changedFiles: number;
+  pr: PrStatus | null;
 }
 
 export type ViewState = "projects" | "tasks" | "taskView";

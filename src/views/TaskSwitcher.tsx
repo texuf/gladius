@@ -109,10 +109,8 @@ export function TaskSwitcher() {
       borderColor="magenta"
       paddingX={2}
       paddingY={1}
-      position="absolute"
-      marginLeft={5}
-      marginTop={2}
-      width={70}
+      flexGrow={1}
+      width="100%"
     >
       <Text bold color="magenta">
         Switch Task

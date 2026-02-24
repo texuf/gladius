@@ -104,7 +104,7 @@ export function TaskList() {
   const handleCloseTask = async (task: Task) => {
     // Delete worktree
     if (task.worktree_path && activeProject) {
-      await deleteWorktree(activeProject.path, task.worktree_path);
+      await deleteWorktree(activeProject.path, task.worktree_path, task.branch_name);
     }
     dbCloseTask(task.id);
     reloadTasks();
