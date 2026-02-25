@@ -105,6 +105,12 @@ export function App() {
     const focusPane = useStore.getState().focusPane;
     if (modal || addingProject || focusPane !== "none") return;
 
+    // Esc on task list -> Project Selection
+    if (key.escape && view === "tasks") {
+      setView("projects");
+      return;
+    }
+
     // Ctrl+O / Cmd+Shift+0 — Return to Project Selection
     if ((input === "o" && key.ctrl) || (input === ")" && key.super)) {
       setView("projects");
