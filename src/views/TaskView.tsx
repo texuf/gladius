@@ -26,6 +26,7 @@ export function TaskView() {
   const prIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const setView = useStore((s) => s.setView);
   const setActiveTask = useStore((s) => s.setActiveTask);
+  const setTasks = useStore((s) => s.setTasks);
   const modal = useStore((s) => s.modal);
   const setModal = useStore((s) => s.setModal);
   const gitStatuses = useStore((s) => s.gitStatuses);
@@ -63,6 +64,7 @@ export function TaskView() {
     };
     updateTask(activeTask.id, updates);
     setActiveTask({ ...activeTask, ...updates });
+    setTasks(useStore.getState().tasks.map((t) => t.id === activeTask.id ? { ...t, ...updates } : t));
     setChordBuffer("");
     setFocusPane("console");
     markConsoleInteracted(activeTask.id);
@@ -275,8 +277,6 @@ export function TaskView() {
       }
     }
   });
-
-  const setTasks = useStore((s) => s.setTasks);
 
   const handleSquashMerge = async (prNumber: number) => {
     if (!activeTask?.worktree_path) return;

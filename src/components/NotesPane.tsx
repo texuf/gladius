@@ -9,6 +9,7 @@ export function NotesPane() {
   const focusPane = useStore((s) => s.focusPane);
   const setFocusPane = useStore((s) => s.setFocusPane);
   const setActiveTask = useStore((s) => s.setActiveTask);
+  const setTasks = useStore((s) => s.setTasks);
   const [editValue, setEditValue] = useState(activeTask?.description || "");
   const isEditing = focusPane === "notes";
 
@@ -16,8 +17,10 @@ export function NotesPane() {
 
   const handleSubmit = () => {
     if (activeTask) {
-      updateTask(activeTask.id, { description: editValue });
-      setActiveTask({ ...activeTask, description: editValue });
+      const updates = { description: editValue };
+      updateTask(activeTask.id, updates);
+      setActiveTask({ ...activeTask, ...updates });
+      setTasks(useStore.getState().tasks.map((t) => t.id === activeTask.id ? { ...t, ...updates } : t));
     }
     setFocusPane("none");
   };

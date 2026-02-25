@@ -82,8 +82,12 @@ export function TaskList() {
         setSelectedIndex(selectedIndex + 1);
       }
     } else if (key.return && selectedTask?.status === "active") {
+      if (!activeProject) return;
       touchTask(selectedTask.id);
-      setActiveTask(selectedTask);
+      const refreshedTasks = getTasksForProject(activeProject.id);
+      setTasks(refreshedTasks);
+      const refreshedTask = refreshedTasks.find((t) => t.id === selectedTask.id) ?? selectedTask;
+      setActiveTask(refreshedTask);
       setView("taskView");
     } else if (key.return && selectedTask?.status === "closing") {
       // No-op — task is being closed

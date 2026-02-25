@@ -76,18 +76,20 @@ export function TaskSwitcher() {
       // Switch to this task
       touchTask(task.id);
 
-      // If different project, switch project too
-      if (!activeProject || activeProject.id !== task.projectId) {
-        const projects = getAllProjects();
-        const project = projects.find((p) => p.id === task.projectId);
-        if (project) {
+      const projects = getAllProjects();
+      const project = projects.find((p) => p.id === task.projectId);
+      if (project) {
+        if (!activeProject || activeProject.id !== project.id) {
           touchProject(project.id);
           setActiveProject(project);
-          setTasks(getTasksForProject(project.id));
         }
+        const projectTasks = getTasksForProject(project.id);
+        setTasks(projectTasks);
+        const freshTask = projectTasks.find((t) => t.id === task.id) ?? task;
+        setActiveTask(freshTask);
+      } else {
+        setActiveTask(task);
       }
-
-      setActiveTask(task);
       setView("taskView");
     }
   });

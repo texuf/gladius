@@ -46,6 +46,7 @@ export function TerminalPane({ type, label, focusKey, paused = false }: Terminal
   const setFocusPane = useStore((s) => s.setFocusPane);
   const activeTask = useStore((s) => s.activeTask);
   const setActiveTask = useStore((s) => s.setActiveTask);
+  const setTasks = useStore((s) => s.setTasks);
   const isFocused = focusPane === type;
   const [termError, setTermError] = useState("");
   const captureCleanupRef = useRef<(() => void) | null>(null);
@@ -93,10 +94,12 @@ export function TerminalPane({ type, label, focusKey, paused = false }: Terminal
         const updates = { claude_session_id: sessionId, session_id: sessionId };
         updateTask(activeTask.id, updates);
         setActiveTask({ ...activeTask, ...updates });
+        setTasks(useStore.getState().tasks.map((t) => t.id === activeTask.id ? { ...t, ...updates } : t));
       } else {
         const updates = { codex_session_id: sessionId, session_id: sessionId };
         updateTask(activeTask.id, updates);
         setActiveTask({ ...activeTask, ...updates });
+        setTasks(useStore.getState().tasks.map((t) => t.id === activeTask.id ? { ...t, ...updates } : t));
       }
     };
 
