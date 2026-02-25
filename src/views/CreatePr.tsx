@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Box, Text, useInput } from "ink";
 import InkTextInput from "ink-text-input";
+import { $ } from "bun";
 import { useStore } from "../store/index.js";
 import { getAppState, setAppState } from "../services/db.js";
 import {
@@ -160,6 +161,8 @@ export function CreatePr() {
       setPrNumber(result.number);
       setPrUrl(result.url);
       setPhase("done");
+      // Open PR in browser
+      $`open ${result.url}`.quiet();
     } catch (e: any) {
       const stderr = e.stderr?.toString?.()?.trim?.();
       setErrorMsg(stderr || e.message || "Failed to create PR");
@@ -212,7 +215,7 @@ export function CreatePr() {
       if (key.upArrow) {
         setReviewerIndex(Math.max(0, reviewerIndex - 1));
       } else if (key.downArrow) {
-        setReviewerIndex(Math.min(globalReviewers.length - 1, reviewerIndex));
+        setReviewerIndex(Math.min(globalReviewers.length - 1, reviewerIndex + 1));
       } else if (input === " " && globalReviewers.length > 0) {
         const handle = globalReviewers[reviewerIndex]?.handle;
         if (handle) {
