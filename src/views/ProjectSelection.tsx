@@ -151,9 +151,13 @@ export function ProjectSelection() {
           </Text>
           <Text dimColor>  Add Project</Text>
         </Box>
+        <Box marginBottom={1}>
+          <Text dimColor>cd to your project directory, then press Esc to confirm</Text>
+        </Box>
         <EmbeddedTerminal
           taskId="__add-project"
           cwd={process.env.HOME || "/"}
+          singleEsc
           onEsc={handleTerminalEsc}
           onError={handleTerminalError}
         />
