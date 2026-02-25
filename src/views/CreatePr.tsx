@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Box, Text, useInput } from "ink";
 import InkTextInput from "ink-text-input";
-import { $ } from "bun";
 import { useStore } from "../store/index.js";
 import { getAppState, setAppState } from "../services/db.js";
 import {
@@ -162,7 +161,7 @@ export function CreatePr() {
       setPrUrl(result.url);
       setPhase("done");
       // Open PR in browser
-      $`open ${result.url}`.quiet();
+      try { Bun.spawn(["open", result.url], { stdio: ["ignore", "ignore", "ignore"] }); } catch {}
     } catch (e: any) {
       const stderr = e.stderr?.toString?.()?.trim?.();
       setErrorMsg(stderr || e.message || "Failed to create PR");
