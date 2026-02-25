@@ -7,6 +7,8 @@ import { TaskList } from "./views/TaskList.js";
 import { TaskView } from "./views/TaskView.js";
 import { TaskSwitcher } from "./views/TaskSwitcher.js";
 import { PrComments } from "./views/PrComments.js";
+import { Settings } from "./views/Settings.js";
+import { CreatePr } from "./views/CreatePr.js";
 import { HotkeyHints } from "./components/HotkeyHints.js";
 import { hasModifier } from "./utils/keyboard.js";
 import type { ViewState } from "./store/types.js";
@@ -50,7 +52,7 @@ export function App() {
     // Fall back to tasks if we were on taskView but the task no longer exists
     if (savedView === "taskView" && !useStore.getState().activeTask) {
       useStore.getState().setView("tasks");
-    } else if (savedView === "taskSwitcher" || savedView === "prComments") {
+    } else if (savedView === "taskSwitcher" || savedView === "prComments" || savedView === "settings" || savedView === "createPr") {
       // Don't restore into transient views — go to tasks instead
       useStore.getState().setView("tasks");
     } else {
@@ -137,6 +139,10 @@ export function App() {
         return <TaskSwitcher />;
       case "prComments":
         return <PrComments />;
+      case "settings":
+        return <Settings />;
+      case "createPr":
+        return <CreatePr />;
       default:
         return <ProjectSelection />;
     }

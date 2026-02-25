@@ -36,8 +36,10 @@ export function HotkeyHints() {
     hints.push("↑↓ Navigate", "⏎ Switch", "Esc Cancel");
   } else if (view === "projects" && addingProject) {
     hints.push("Esc Cancel");
+  } else if (view === "settings") {
+    hints.push("↑↓ Navigate", "⏎ Edit", "Esc Back");
   } else if (view === "projects") {
-    hints.push("↑↓ Navigate", "⏎ Select", "Ctrl+N New Project", "d Delete");
+    hints.push("↑↓ Navigate", "⏎ Select", "Ctrl+N New Project", "d Delete", "s Settings");
   } else if (view === "tasks") {
     hints.push(
       "↑↓ Navigate",
@@ -58,12 +60,16 @@ export function HotkeyHints() {
       const pr = activeTask && gitStatuses[activeTask.id]?.pr;
       const hasIssues = pr && (pr.unresolvedThreads > 0 || pr.ciFailed > 0 || pr.ciPending > 0);
       const isGreen = pr && pr.state === "open" && pr.ciFailed === 0 && pr.ciPending === 0 && pr.unresolvedThreads === 0;
+      const branch = activeTask && gitStatuses[activeTask.id]?.branch;
+      const canCreatePr = !pr && branch !== "main" && branch !== "master" && activeTask?.worktree_path;
+      const createPrHints = canCreatePr ? ["p Create PR"] : [];
       const prHints = hasIssues ? ["v PR Issues"] : [];
       const mergeHints = isGreen ? ["s Squash Merge"] : [];
       hints.push(
         "i Notes",
         "t Terminal",
         ...modelHints,
+        ...createPrHints,
         ...prHints,
         ...mergeHints,
         "y Copy",
@@ -75,6 +81,8 @@ export function HotkeyHints() {
       const escHint = focusPane === "console" ? "Esc" : "Esc×2";
       hints.push(`${escHint} Unfocus (${focusPane})`);
     }
+  } else if (view === "createPr") {
+    hints.push("Esc Cancel");
   } else if (view === "prComments") {
     hints.push("↑↓ Navigate", "p Paste to Console", "s Resolve", "Esc Back");
   }

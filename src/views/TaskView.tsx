@@ -208,6 +208,16 @@ export function TaskView() {
       return;
     }
 
+    // Create PR
+    if (input === "p" && !key.super && activeTask?.worktree_path) {
+      const pr = gitStatuses[activeTask.id]?.pr;
+      const currentBranch = gitStatuses[activeTask.id]?.branch;
+      if (!pr && currentBranch !== "main" && currentBranch !== "master") {
+        setView("createPr");
+      }
+      return;
+    }
+
     // Copy mode toggle
     if (input === "y" && !key.super) {
       setCopyMode(true);

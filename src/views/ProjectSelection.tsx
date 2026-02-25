@@ -105,6 +105,8 @@ export function ProjectSelection() {
         setTasks(tasks);
         setView("tasks");
       }
+    } else if (input === "s") {
+      setView("settings");
     } else if (input === "d" && projects.length > 0) {
       const project = projects[selectedIndex];
       if (project) {

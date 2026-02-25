@@ -50,7 +50,12 @@ export interface GitStatus {
   pr: PrStatus | null;
 }
 
-export type ViewState = "projects" | "tasks" | "taskView" | "taskSwitcher" | "prComments";
+export interface Reviewer {
+  name: string;
+  handle: string;
+}
+
+export type ViewState = "projects" | "tasks" | "taskView" | "taskSwitcher" | "prComments" | "settings" | "createPr";
 
 export type FocusPane = "none" | "notes" | "terminal" | "console";
 

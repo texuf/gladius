@@ -364,6 +364,81 @@ export async function getCiFailures(repoPath: string, branch?: string): Promise<
   }
 }
 
+/**
+ * Detect the main branch name from the remote HEAD.
+ */
+export async function getMainBranch(repoPath: string): Promise<string> {
+  try {
+    const ref = await $`git -C ${repoPath} symbolic-ref refs/remotes/origin/HEAD`.text();
+    // refs/remotes/origin/main → main
+    return ref.trim().replace("refs/remotes/origin/", "");
+  } catch {
+    return "main";
+  }
+}
+
+/**
+ * Get commit log messages between main and HEAD.
+ */
+export async function getCommitLog(repoPath: string, mainBranch?: string): Promise<string> {
+  const main = mainBranch || (await getMainBranch(repoPath));
+  try {
+    return (await $`git -C ${repoPath} log origin/${main}..HEAD --pretty=format:%s%n%b`.text()).trim();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Get diff stat between main and HEAD.
+ */
+export async function getDiffStat(repoPath: string, mainBranch?: string): Promise<string> {
+  const main = mainBranch || (await getMainBranch(repoPath));
+  try {
+    return (await $`git -C ${repoPath} diff --stat origin/${main}..HEAD`.text()).trim();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Stage all changes and commit with the given message.
+ */
+export async function stageAndCommit(repoPath: string, message: string): Promise<void> {
+  await $`git -C ${repoPath} add .`;
+  await $`git -C ${repoPath} commit -m ${message}`;
+}
+
+/**
+ * Push the current branch to origin, setting upstream.
+ */
+export async function pushBranch(repoPath: string, branchName: string): Promise<void> {
+  await $`git -C ${repoPath} push -u origin ${branchName}`;
+}
+
+/**
+ * Create a pull request using gh CLI. Returns the PR number and URL.
+ */
+export async function createPullRequest(
+  repoPath: string,
+  title: string,
+  body: string,
+  reviewers: string[],
+): Promise<{ number: number; url: string }> {
+  const remoteUrl = (await $`git -C ${repoPath} remote get-url origin`.text()).trim();
+  // Build reviewer args: ["--reviewer", "user1", "--reviewer", "user2"]
+  const reviewerArgs: string[] = [];
+  for (const r of reviewers) {
+    reviewerArgs.push("--reviewer", r);
+  }
+  const allArgs = ["pr", "create", "--title", title, "--body", body, "--repo", remoteUrl, ...reviewerArgs];
+  const result = await $`gh ${allArgs}`.cwd(repoPath).text();
+  // gh pr create outputs the PR URL on the last line
+  const url = result.trim().split("\n").pop()!.trim();
+  const numMatch = url.match(/\/pull\/(\d+)/);
+  return { number: numMatch ? parseInt(numMatch[1], 10) : 0, url };
+}
+
 export function formatPrStatus(pr: PrStatus): string {
   const state = pr.state === "open" ? "OPEN" : pr.state === "merged" ? "MERGED" : "CLOSED";
   const parts = [`PR #${pr.number} ${state}`];
