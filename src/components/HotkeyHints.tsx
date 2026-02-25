@@ -84,7 +84,7 @@ export function HotkeyHints() {
   } else if (view === "createPr") {
     hints.push("Esc Cancel");
   } else if (view === "prComments") {
-    hints.push("↑↓ Navigate", "p Paste to Console", "s Resolve", "Esc Back");
+    hints.push("↑↓ Navigate", "p Paste", "P Paste All", "s Resolve", "Esc Back");
   }
 
   return (

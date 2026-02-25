@@ -101,6 +101,27 @@ export function PrComments() {
       return;
     }
 
+    if (input === "P" && activeTask && totalItems > 0) {
+      const parts: string[] = [];
+      if (ciFailures.length > 0) {
+        parts.push("Please fix these CI failures:\n");
+        for (const f of ciFailures) {
+          parts.push(formatCiFailureForPaste(f));
+        }
+      }
+      if (threads.length > 0) {
+        parts.push("Please fix these PR review comments:\n");
+        for (const t of threads) {
+          parts.push(formatThreadForPaste(t));
+        }
+      }
+      writeToSession(`${activeTask.id}-console`, parts.join("\n---\n\n"));
+      setFocusPane("console");
+      useStore.getState().markConsoleInteracted(activeTask.id);
+      goBack();
+      return;
+    }
+
     if (input === "p" && activeTask) {
       if (selectedCi) {
         writeToSession(`${activeTask.id}-console`, formatCiFailureForPaste(selectedCi));
