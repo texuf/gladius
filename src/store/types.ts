@@ -71,6 +71,7 @@ export interface ReviewThread {
 }
 
 export interface ReviewComment {
+  title: string | null;
   body: string;
   author: string;
   createdAt: string;

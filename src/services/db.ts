@@ -122,6 +122,13 @@ export function setAppState(key: string, value: string | null): void {
   }
 }
 
+export function getAppStatesByPrefix(prefix: string): Array<{ key: string; value: string | null }> {
+  const db = getDb();
+  return db
+    .query("SELECT key, value FROM app_state WHERE key LIKE ? ORDER BY key ASC")
+    .all(`${prefix}%`) as Array<{ key: string; value: string | null }>;
+}
+
 // ── Project CRUD ──
 
 export function getAllProjects(): Project[] {

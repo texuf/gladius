@@ -151,14 +151,15 @@ function cleanCommentBody(body: string): string {
     body = extracted;
   }
 
-  return body
+  const cleaned = body
     .replace(/<!--[\s\S]*?-->/g, "")                    // HTML comments
-    .replace(/<details[\s\S]*?<\/details>/gi, "")        // <details> blocks
-    .replace(/<picture[\s\S]*?<\/picture>/gi, "")        // <picture> blocks
-    .replace(/<a\s+href="https?:\/\/cursor\.com[^"]*"[^>]*>[\s\S]*?<\/a>/gi, "") // cursor links
+    // Strip container tags but keep their inner text (some bots put useful text in <details>/<summary>)
+    .replace(/<\/?(details|summary|picture|a)\b[^>]*>/gi, "")
     .replace(/<\/?[^>]+>/g, "")                          // remaining HTML tags
     .replace(/\n{3,}/g, "\n\n")                          // collapse blank lines
     .trim();
+
+  return cleaned;
 }
 
 /**
@@ -185,7 +186,7 @@ export async function getPrComments(repoPath: string, branch?: string): Promise<
               path
               line
               startLine
-              comments(first: 10) {
+              comments(last: 50) {
                 nodes {
                   body
                   author { login }
