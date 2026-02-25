@@ -22,8 +22,6 @@ type Phase =
   | "committing"
   | "reviewers"
   | "generating"
-  | "confirm"
-  | "editingTitle"
   | "creating"
   | "done"
   | "error";
@@ -138,7 +136,17 @@ export function CreatePr() {
       const { title, description } = await generatePrDescription(apiKey, commitLog, diffStat);
       setPrTitle(title);
       setPrDescription(description);
-      setPhase("confirm");
+      // Skip confirmation — go straight to creating the PR
+      setPhase("creating");
+      const reviewerList = Array.from(selectedHandles);
+      if (activeProject) {
+        setAppState(`reviewers.project.${activeProject.id}`, JSON.stringify(reviewerList));
+      }
+      const result = await createPullRequest(repoPath, title, description, reviewerList);
+      setPrNumber(result.number);
+      setPrUrl(result.url);
+      setPhase("done");
+      try { Bun.spawn(["open", result.url], { stdio: ["ignore", "ignore", "ignore"] }); } catch {}
     } catch (e: any) {
       const stderr = e.stderr?.toString?.()?.trim?.();
       setErrorMsg(stderr || e.message || "Failed to generate PR description");
@@ -146,28 +154,6 @@ export function CreatePr() {
     }
   };
 
-  const handleCreate = async () => {
-    setPhase("creating");
-    try {
-      const reviewerList = Array.from(selectedHandles);
-
-      // Save project defaults
-      if (activeProject) {
-        setAppState(`reviewers.project.${activeProject.id}`, JSON.stringify(reviewerList));
-      }
-
-      const result = await createPullRequest(repoPath, prTitle, prDescription, reviewerList);
-      setPrNumber(result.number);
-      setPrUrl(result.url);
-      setPhase("done");
-      // Open PR in browser
-      try { Bun.spawn(["open", result.url], { stdio: ["ignore", "ignore", "ignore"] }); } catch {}
-    } catch (e: any) {
-      const stderr = e.stderr?.toString?.()?.trim?.();
-      setErrorMsg(stderr || e.message || "Failed to create PR");
-      setPhase("error");
-    }
-  };
 
   const addNewReviewer = (name: string, handle: string) => {
     const trimName = name.trim();
@@ -185,8 +171,7 @@ export function CreatePr() {
   // Text input active in these phases
   const textInputActive =
     phase === "uncommitted" ||
-    (phase === "reviewers" && addingReviewer !== null) ||
-    phase === "editingTitle";
+    (phase === "reviewers" && addingReviewer !== null);
 
   useInput((input, key) => {
     // Gate: when text input is active, only handle Escape to cancel
@@ -198,8 +183,6 @@ export function CreatePr() {
           setAddingReviewer(null);
           setAddName("");
           setAddHandle("");
-        } else if (phase === "editingTitle") {
-          setPhase("confirm");
         }
       }
       return;
@@ -235,14 +218,6 @@ export function CreatePr() {
       return;
     }
 
-    if (phase === "confirm") {
-      if (key.return) {
-        handleCreate();
-      } else if (input === "e") {
-        setPhase("editingTitle");
-      }
-      return;
-    }
   });
 
   if (!activeTask) return null;
@@ -342,44 +317,6 @@ export function CreatePr() {
       {phase === "generating" && (
         <Box flexDirection="column">
           <Text dimColor>Pushing branch and generating PR description...</Text>
-        </Box>
-      )}
-
-      {/* Confirm */}
-      {(phase === "confirm" || phase === "editingTitle") && (
-        <Box flexDirection="column">
-          <Box marginBottom={1}>
-            <Text bold>Title: </Text>
-            {phase === "editingTitle" ? (
-              <InkTextInput
-                value={prTitle}
-                onChange={setPrTitle}
-                onSubmit={() => setPhase("confirm")}
-              />
-            ) : (
-              <Text>{prTitle}</Text>
-            )}
-          </Box>
-
-          <Box flexDirection="column" marginBottom={1}>
-            <Text bold>Description:</Text>
-            <Box paddingLeft={1} flexDirection="column">
-              {prDescription.split("\n").map((line, i) => (
-                <Text key={i} dimColor>{line}</Text>
-              ))}
-            </Box>
-          </Box>
-
-          {selectedHandles.size > 0 && (
-            <Box marginBottom={1}>
-              <Text bold>Reviewers: </Text>
-              <Text>{Array.from(selectedHandles).map((h) => `@${h}`).join(", ")}</Text>
-            </Box>
-          )}
-
-          {phase === "confirm" && (
-            <Text dimColor>Enter: create PR  e: edit title  Esc: cancel</Text>
-          )}
         </Box>
       )}
 
