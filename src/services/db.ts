@@ -41,6 +41,8 @@ function initSchema() {
       description TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active',
       model TEXT,
+      claude_session_id TEXT,
+      codex_session_id TEXT,
       session_id TEXT,
       worktree_path TEXT,
       branch_name TEXT,
@@ -63,6 +65,44 @@ function initSchema() {
       value TEXT
     );
   `);
+
+  migrateSchema();
+}
+
+function hasColumn(tableName: string, columnName: string): boolean {
+  const columns = db.query(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  return columns.some((column) => column.name === columnName);
+}
+
+function migrateSchema() {
+  const hasClaudeSessionColumn = hasColumn("tasks", "claude_session_id");
+  const hasCodexSessionColumn = hasColumn("tasks", "codex_session_id");
+  const hasLegacySessionColumn = hasColumn("tasks", "session_id");
+
+  if (!hasClaudeSessionColumn) {
+    db.exec("ALTER TABLE tasks ADD COLUMN claude_session_id TEXT;");
+  }
+  if (!hasCodexSessionColumn) {
+    db.exec("ALTER TABLE tasks ADD COLUMN codex_session_id TEXT;");
+  }
+
+  // Backfill existing single-session rows into provider-specific columns.
+  // Keep legacy session_id intact so no existing data is lost.
+  if (hasLegacySessionColumn) {
+    db.exec(`
+      UPDATE tasks
+      SET claude_session_id = session_id
+      WHERE model = 'claude'
+        AND session_id IS NOT NULL
+        AND claude_session_id IS NULL;
+
+      UPDATE tasks
+      SET codex_session_id = session_id
+      WHERE model = 'codex'
+        AND session_id IS NOT NULL
+        AND codex_session_id IS NULL;
+    `);
+  }
 }
 
 // ── App State (key-value) ──
@@ -174,6 +214,8 @@ export function createTask(
     description,
     status: "active",
     model: null,
+    claude_session_id: null,
+    codex_session_id: null,
     session_id: null,
     worktree_path: worktreePath,
     branch_name: branchName,
@@ -184,12 +226,13 @@ export function createTask(
   };
 
   db.query(
-    `INSERT INTO tasks (id, project_id, label, description, status, model, session_id, worktree_path, branch_name, sort_order, created_at, last_accessed_at, closed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO tasks (id, project_id, label, description, status, model, claude_session_id, codex_session_id, session_id, worktree_path, branch_name, sort_order, created_at, last_accessed_at, closed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     task.id, task.project_id, task.label, task.description, task.status,
-    task.model, task.session_id, task.worktree_path, task.branch_name,
-    task.sort_order, task.created_at, task.last_accessed_at, task.closed_at
+    task.model, task.claude_session_id, task.codex_session_id, task.session_id,
+    task.worktree_path, task.branch_name, task.sort_order, task.created_at,
+    task.last_accessed_at, task.closed_at
   );
 
   addTaskEvent(task.id, "created");

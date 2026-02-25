@@ -65,7 +65,13 @@ export function TerminalPane({ type, label, focusKey, paused = false }: Terminal
   const consoleDims = canEmbed && type === "console" ? getConsoleDimensions() : null;
 
   const command = type === "console" && activeTask?.model
-    ? buildLlmCommand(activeTask.model, activeTask.session_id, activeTask.worktree_path ?? undefined)
+    ? buildLlmCommand(
+        activeTask.model,
+        activeTask.model === "claude"
+          ? (activeTask.claude_session_id ?? activeTask.session_id)
+          : (activeTask.codex_session_id ?? activeTask.session_id),
+        activeTask.worktree_path ?? undefined
+      )
     : undefined;
 
   // Session ID capture for console pane
@@ -76,12 +82,22 @@ export function TerminalPane({ type, label, focusKey, paused = false }: Terminal
     const sessionKey = `${activeTask.id}-console`;
     const session = getSession(sessionKey);
     if (!session?.isNew) return;
-    // Already have a session_id, no need to capture
-    if (activeTask.session_id) return;
+    // Already have a provider-specific session_id, no need to capture
+    if (
+      (activeTask.model === "claude" && activeTask.claude_session_id) ||
+      (activeTask.model === "codex" && activeTask.codex_session_id)
+    ) return;
 
     const onCapture = (sessionId: string) => {
-      updateTask(activeTask.id, { session_id: sessionId });
-      setActiveTask({ ...activeTask, session_id: sessionId });
+      if (activeTask.model === "claude") {
+        const updates = { claude_session_id: sessionId, session_id: sessionId };
+        updateTask(activeTask.id, updates);
+        setActiveTask({ ...activeTask, ...updates });
+      } else {
+        const updates = { codex_session_id: sessionId, session_id: sessionId };
+        updateTask(activeTask.id, updates);
+        setActiveTask({ ...activeTask, ...updates });
+      }
     };
 
     if (activeTask.model === "claude") {
@@ -102,6 +118,9 @@ export function TerminalPane({ type, label, focusKey, paused = false }: Terminal
       : "Press cl (Claude) or co (Codex) to start")
     : "[No worktree — create one first]";
 
+  const embeddedTaskId = activeTask ? `${activeTask.id}-${type}` : "";
+  const embeddedKey = type === "console" ? `${embeddedTaskId}-${activeTask?.model ?? "none"}` : embeddedTaskId;
+
   return (
     <Box
       flexDirection="column"
@@ -121,7 +140,8 @@ export function TerminalPane({ type, label, focusKey, paused = false }: Terminal
 
       {canEmbed && !termError ? (
         <EmbeddedTerminal
-          taskId={`${activeTask!.id}-${type}`}
+          key={embeddedKey}
+          taskId={embeddedTaskId}
           cwd={activeTask!.worktree_path!}
           command={command}
           focused={isFocused}
@@ -144,7 +164,11 @@ export function TerminalPane({ type, label, focusKey, paused = false }: Terminal
               {"\n"}Press {type === "console" ? "Esc" : "Esc×2"} to unfocus
             </Text>
           ) : (
-            <Text dimColor>{type === "console" && !activeTask?.model ? "cl: claude / co: codex" : `Press ${focusKey} to focus`}</Text>
+            <Text dimColor>
+              {type === "console"
+                ? (activeTask?.model ? "Press c to focus  (l/o: switch model)" : "cl: claude / co: codex")
+                : `Press ${focusKey} to focus`}
+            </Text>
           )}
         </Box>
       )}

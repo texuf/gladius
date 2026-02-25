@@ -55,7 +55,7 @@ export function HotkeyHints() {
       hints.push("y Exit Copy", "Esc Exit Copy");
     } else if (focusPane === "none") {
       const modelHints = activeTask?.model
-        ? ["c Console"]
+        ? ["c Console", "l Claude", "o Codex"]
         : ["cl Claude", "co Codex"];
       const pr = activeTask && gitStatuses[activeTask.id]?.pr;
       const hasIssues = pr && (pr.unresolvedThreads > 0 || pr.ciFailed > 0 || pr.ciPending > 0);

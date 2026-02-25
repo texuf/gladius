@@ -74,7 +74,9 @@ bun --watch run src/index.tsx
 | `i` | Edit notes |
 | `t` | Focus terminal pane |
 | `c` | Focus console pane |
-| `cl` | Select Claude as model |
-| `co` | Select Codex as model |
+| `cl` | Select Claude (first selection) |
+| `co` | Select Codex (first selection) |
+| `l` | Switch to Claude |
+| `o` | Switch to Codex |
 | `Esc` | Unfocus pane / go back |
 | `x` | Close task |

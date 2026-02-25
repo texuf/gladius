@@ -35,6 +35,39 @@ export function TaskView() {
   const setCopyMode = useStore((s) => s.setCopyMode);
   const [fetching, setFetching] = useState(false);
 
+  const markConsoleInteracted = (taskId: string) => {
+    useStore.getState().markConsoleInteracted(taskId);
+    useStore.getState().setTaskStatuses({
+      ...useStore.getState().taskStatuses,
+      [taskId]: "yellow",
+    });
+  };
+
+  const selectModel = (model: "claude" | "codex") => {
+    if (!activeTask) return;
+    if (activeTask.model === model) {
+      setFocusPane("console");
+      markConsoleInteracted(activeTask.id);
+      return;
+    }
+
+    const switchingProvider = !!activeTask.model && activeTask.model !== model;
+    if (switchingProvider) {
+      destroySession(`${activeTask.id}-console`);
+    }
+
+    const updates = {
+      model,
+      // Keep legacy field empty once provider-specific IDs are in use.
+      session_id: null,
+    };
+    updateTask(activeTask.id, updates);
+    setActiveTask({ ...activeTask, ...updates });
+    setChordBuffer("");
+    setFocusPane("console");
+    markConsoleInteracted(activeTask.id);
+  };
+
   // Track when focusPane transitions to "none" (covers both useInput and raw stdin onEsc)
   useEffect(() => {
     if (prevFocusPaneRef.current !== "none" && focusPane === "none") {
@@ -152,11 +185,18 @@ export function TaskView() {
 
     if (input === "c" && !key.super && activeTask?.model) {
       setFocusPane("console");
-      useStore.getState().markConsoleInteracted(activeTask.id);
-      useStore.getState().setTaskStatuses({
-        ...useStore.getState().taskStatuses,
-        [activeTask.id]: "yellow",
-      });
+      markConsoleInteracted(activeTask.id);
+      return;
+    }
+
+    // Switch LLM provider after initial selection
+    if (input === "l" && !key.super && activeTask?.model) {
+      selectModel("claude");
+      return;
+    }
+
+    if (input === "o" && !key.super && activeTask?.model) {
+      selectModel("codex");
       return;
     }
 
@@ -231,16 +271,7 @@ export function TaskView() {
 
       if (chord === "cl" || chord === "co") {
         const model = chord === "cl" ? "claude" : "codex";
-        if (activeTask) {
-          updateTask(activeTask.id, { model });
-          setActiveTask({ ...activeTask, model });
-          setFocusPane("console");
-          useStore.getState().markConsoleInteracted(activeTask.id);
-          useStore.getState().setTaskStatuses({
-            ...useStore.getState().taskStatuses,
-            [activeTask.id]: "yellow",
-          });
-        }
+        selectModel(model);
       }
     }
   });
@@ -262,10 +293,6 @@ export function TaskView() {
 
   const handleCloseTask = () => {
     if (!activeTask || !activeProject) return;
-    // Persist session_id if captured during this session
-    if (activeTask.session_id) {
-      updateTask(activeTask.id, { session_id: activeTask.session_id });
-    }
     // Mark as closing immediately and navigate away
     const closingTask = { ...activeTask, status: "closing" as const };
     setTasks(useStore.getState().tasks.map((t) => t.id === activeTask.id ? closingTask : t));
@@ -331,9 +358,13 @@ export function TaskView() {
         </Box>
         <Box gap={1}>
           <StatusDots {...allDots} />
-          {!activeTask.model && (
+          {!activeTask.model ? (
             <Text dimColor color="yellow">
               cl: Claude  co: Codex
+            </Text>
+          ) : (
+            <Text dimColor color="yellow">
+              l: Claude  o: Codex
             </Text>
           )}
         </Box>
