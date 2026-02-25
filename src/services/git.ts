@@ -146,8 +146,9 @@ function parseOwnerRepo(remoteUrl: string): { owner: string; repo: string } | nu
 function cleanCommentBody(body: string): string {
   // If description markers exist, extract between them
   const descMatch = body.match(/<!-- DESCRIPTION START -->([\s\S]*?)<!-- DESCRIPTION END -->/);
-  if (descMatch) {
-    body = descMatch[1].trim();
+  const extracted = descMatch?.[1]?.trim();
+  if (extracted) {
+    body = extracted;
   }
 
   return body

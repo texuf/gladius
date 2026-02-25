@@ -214,7 +214,14 @@ export function PrComments() {
               )}
               {threads.map((t, i) => {
                 const globalIndex = ciFailures.length + i;
-                const firstLine = t.comments[0]?.body.split("\n")[0]?.slice(0, 40) || "";
+                const previewComment =
+                  t.comments.find((c) => c.body.trim().length > 0) ?? t.comments[0];
+                const previewLine =
+                  previewComment?.body
+                    .split("\n")
+                    .map((line) => line.trim())
+                    .find((line) => line.length > 0) ?? "[No description]";
+                const firstLine = previewLine.slice(0, 40);
                 const isSelected = globalIndex === selected;
                 return (
                   <Box key={t.id} flexDirection="column">
@@ -227,7 +234,7 @@ export function PrComments() {
                       {t.path}:{t.line}
                     </Text>
                     <Text dimColor wrap="truncate">
-                      {"     "}@{t.comments[0]?.author}: {firstLine}
+                      {"     "}@{previewComment?.author ?? "unknown"}: {firstLine}
                       {firstLine.length >= 40 ? "..." : ""}
                     </Text>
                   </Box>
