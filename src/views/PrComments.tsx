@@ -84,6 +84,13 @@ export function PrComments() {
     );
   };
 
+  const pasteToConsoleAndSubmit = (text: string) => {
+    if (!activeTask) return;
+    const consoleSessionId = `${activeTask.id}-console`;
+    writeToSession(consoleSessionId, text);
+    writeToSession(consoleSessionId, "\r");
+  };
+
   useInput((input, key) => {
     if (key.escape) {
       goBack();
@@ -115,7 +122,7 @@ export function PrComments() {
           parts.push(formatThreadForPaste(t));
         }
       }
-      writeToSession(`${activeTask.id}-console`, parts.join("\n---\n\n"));
+      pasteToConsoleAndSubmit(parts.join("\n---\n\n"));
       setFocusPane("console");
       useStore.getState().markConsoleInteracted(activeTask.id);
       goBack();
@@ -124,12 +131,12 @@ export function PrComments() {
 
     if (input === "p" && activeTask) {
       if (selectedCi) {
-        writeToSession(`${activeTask.id}-console`, formatCiFailureForPaste(selectedCi));
+        pasteToConsoleAndSubmit(formatCiFailureForPaste(selectedCi));
         setFocusPane("console");
         useStore.getState().markConsoleInteracted(activeTask.id);
         goBack();
       } else if (selectedThread) {
-        writeToSession(`${activeTask.id}-console`, formatThreadForPaste(selectedThread));
+        pasteToConsoleAndSubmit(formatThreadForPaste(selectedThread));
         setFocusPane("console");
         useStore.getState().markConsoleInteracted(activeTask.id);
         goBack();
@@ -215,7 +222,9 @@ export function PrComments() {
               {threads.map((t, i) => {
                 const globalIndex = ciFailures.length + i;
                 const previewComment =
-                  t.comments.find((c) => c.body.trim().length > 0) ?? t.comments[0];
+                  [...t.comments].reverse().find((c) => c.body.trim().length > 0) ??
+                  t.comments[t.comments.length - 1] ??
+                  t.comments[0];
                 const previewLine =
                   previewComment?.body
                     .split("\n")
@@ -289,12 +298,18 @@ export function PrComments() {
                   </Text>
                 </Text>
                 <Box marginTop={1} />
-                {selectedThread.comments.map((c, i) => (
-                  <Box key={i} flexDirection="column" marginBottom={1}>
-                    <Text bold>@{c.author}</Text>
-                    <Text wrap="wrap">{c.body}</Text>
-                  </Box>
-                ))}
+                {(() => {
+                  const visibleComments = selectedThread.comments.filter((c) => c.body.trim().length > 0);
+                  if (visibleComments.length === 0) {
+                    return <Text dimColor>No comment text available.</Text>;
+                  }
+                  return visibleComments.map((c, i) => (
+                    <Box key={i} flexDirection="column" marginBottom={1}>
+                      <Text bold>@{c.author}</Text>
+                      <Text wrap="wrap">{c.body}</Text>
+                    </Box>
+                  ));
+                })()}
               </>
             )}
           </Box>
