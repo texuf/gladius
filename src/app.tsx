@@ -23,6 +23,30 @@ export function App() {
   const activeProject = useStore((s) => s.activeProject);
   const addingProject = useStore((s) => s.addingProject);
 
+  const resolveRestoredView = (
+    savedView: ViewState | null,
+    hasProject: boolean,
+    hasTask: boolean
+  ): ViewState => {
+    const preferred = savedView ?? (hasProject ? "tasks" : "projects");
+
+    switch (preferred) {
+      case "projects":
+      case "settings":
+      case "taskSwitcher":
+        return preferred;
+      case "tasks":
+        return hasProject ? "tasks" : "projects";
+      case "taskView":
+      case "prComments":
+      case "createPr":
+        if (hasTask) return preferred;
+        return hasProject ? "tasks" : "projects";
+      default:
+        return hasProject ? "tasks" : "projects";
+    }
+  };
+
   // Restore navigation breadcrumb on startup
   useEffect(() => {
     const savedView = getAppState("nav.view") as ViewState | null;
@@ -30,12 +54,15 @@ export function App() {
     const savedTaskId = getAppState("nav.task_id");
 
     if (!savedProjectId) {
-      if (savedView) useStore.getState().setView(savedView);
+      useStore.getState().setView(resolveRestoredView(savedView, false, false));
       return;
     }
 
     const project = getProjectById(savedProjectId);
-    if (!project) return; // deleted project — stay on projects view
+    if (!project) {
+      useStore.getState().setView(resolveRestoredView(savedView, false, false));
+      return;
+    }
 
     useStore.getState().setActiveProject(project);
     const tasks = getTasksForProject(project.id);
@@ -48,16 +75,8 @@ export function App() {
       }
     }
 
-    // Restore the actual saved view (projects, tasks, or taskView)
-    // Fall back to tasks if we were on taskView but the task no longer exists
-    if (savedView === "taskView" && !useStore.getState().activeTask) {
-      useStore.getState().setView("tasks");
-    } else if (savedView === "taskSwitcher" || savedView === "prComments" || savedView === "settings" || savedView === "createPr") {
-      // Don't restore into transient views — go to tasks instead
-      useStore.getState().setView("tasks");
-    } else {
-      useStore.getState().setView(savedView || "tasks");
-    }
+    const hasTask = !!useStore.getState().activeTask;
+    useStore.getState().setView(resolveRestoredView(savedView, true, hasTask));
   }, []);
 
   // Poll task statuses globally (LLM activity + PR status)
