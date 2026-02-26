@@ -199,12 +199,13 @@ export function TaskList() {
           {activeProject.name}
         </Text>
         {(() => {
-          const dots = { green: 0, red: 0, orange: 0, yellow: 0 };
+          const dots = { green: 0, red: 0, orange: 0, yellow: 0, purple: 0 };
           for (const color of Object.values(taskStatuses)) {
             if (color === "green") dots.green++;
             else if (color === "red") dots.red++;
             else if (color === "orange") dots.orange++;
             else if (color === "yellow") dots.yellow++;
+            else if (color === "purple") dots.purple++;
           }
           return <StatusDots {...dots} />;
         })()}
@@ -239,6 +240,7 @@ export function TaskList() {
                   red={taskColor === "red" ? 1 : 0}
                   orange={taskColor === "orange" ? 1 : 0}
                   yellow={taskColor === "yellow" ? 1 : 0}
+                  purple={taskColor === "purple" ? 1 : 0}
                 />
               ) : (
                 <Text> </Text>

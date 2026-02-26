@@ -11,6 +11,7 @@ import {
   formatPrStatus,
   getGitStatus,
   getGitStatusWithPr,
+  clearPrCacheForBranch,
 } from "../services/git.js";
 import { refreshAllTaskStatuses } from "../services/taskStatus.js";
 import {
@@ -279,11 +280,29 @@ export function TaskView() {
       return;
     }
 
-    // Create PR
+    // Create PR / Clear merged PR
     if (input === "p" && !key.super && activeTask?.worktree_path) {
       const pr = gitStatuses[activeTask.id]?.pr;
       const currentBranch = gitStatuses[activeTask.id]?.branch;
-      if (!pr && currentBranch !== "main" && currentBranch !== "master") {
+      if (currentBranch === "main" || currentBranch === "master") return;
+      if (pr && pr.state === "merged") {
+        // Clear merged PR association
+        clearPrCacheForBranch(activeTask.worktree_path, currentBranch || "");
+        useStore.getState().setGitStatus(activeTask.id, {
+          ...(gitStatuses[activeTask.id] || {
+            branch: currentBranch || "",
+            ahead: 0,
+            behind: 0,
+            dirty: false,
+            pr: null,
+          }),
+          pr: null,
+        });
+        useStore.getState().setTaskStatuses({
+          ...useStore.getState().taskStatuses,
+          [activeTask.id]: "none",
+        });
+      } else if (!pr) {
         setView("createPr");
       }
       return;
@@ -415,12 +434,13 @@ export function TaskView() {
   const gitStatus = gitStatuses[activeTask.id];
 
   // Aggregate status dots for ALL tasks (including active)
-  const allDots = { green: 0, red: 0, orange: 0, yellow: 0 };
+  const allDots = { green: 0, red: 0, orange: 0, yellow: 0, purple: 0 };
   for (const [, color] of Object.entries(taskStatuses)) {
     if (color === "green") allDots.green++;
     else if (color === "red") allDots.red++;
     else if (color === "orange") allDots.orange++;
     else if (color === "yellow") allDots.yellow++;
+    else if (color === "purple") allDots.purple++;
   }
 
   return (

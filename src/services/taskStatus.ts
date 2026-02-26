@@ -161,6 +161,7 @@ function resolveTaskStatusColor(
       return "red";
     }
     if (pr.ciPending > 0) return "yellow";
+    if (pr.state === "merged") return "purple";
     if (
       pr.state === "open" &&
       !pr.hasConflicts &&

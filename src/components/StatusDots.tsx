@@ -6,15 +6,23 @@ interface StatusDotsProps {
   red?: number;
   orange?: number;
   yellow?: number;
+  purple?: number;
 }
 
-export function StatusDots({ green = 0, red = 0, orange = 0, yellow = 0 }: StatusDotsProps) {
+export function StatusDots({ green = 0, red = 0, orange = 0, yellow = 0, purple = 0 }: StatusDotsProps) {
   const parts: React.ReactNode[] = [];
 
   if (green > 0) {
     parts.push(
       <Text key="green" color="green">
         {"●".repeat(green)}
+      </Text>
+    );
+  }
+  if (purple > 0) {
+    parts.push(
+      <Text key="purple" color="#A855F7">
+        {"●".repeat(purple)}
       </Text>
     );
   }

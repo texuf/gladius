@@ -414,13 +414,14 @@ export function ProjectSelection() {
         const previous = i > 0 ? projects[i - 1] : null;
         const showGroupHeader =
           !previous || previous.group_name !== project.group_name;
-        const dots = { green: 0, red: 0, orange: 0, yellow: 0 };
+        const dots = { green: 0, red: 0, orange: 0, yellow: 0, purple: 0 };
         for (const tid of projectTaskIds[project.id] || []) {
           const c = taskStatuses[tid];
           if (c === "green") dots.green++;
           else if (c === "red") dots.red++;
           else if (c === "orange") dots.orange++;
           else if (c === "yellow") dots.yellow++;
+          else if (c === "purple") dots.purple++;
         }
         return (
           <Box key={project.id} flexDirection="column">

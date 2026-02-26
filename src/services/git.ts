@@ -137,7 +137,7 @@ async function getOpenPrStatusesForRepo(
 
   const query = `query {
     repository(owner: "${owner}", name: "${repo}") {
-      pullRequests(first: 100, states: OPEN, orderBy: { field: UPDATED_AT, direction: DESC }) {
+      pullRequests(first: 100, states: [OPEN, MERGED], orderBy: { field: UPDATED_AT, direction: DESC }) {
         nodes {
           number
           state
@@ -221,6 +221,15 @@ async function getOpenPrStatusesForRepo(
 
   prStatusInFlightByRemote.set(remoteUrl, fetchPromise);
   return fetchPromise;
+}
+
+export function clearPrCacheForBranch(
+  repoPath: string,
+  branch: string,
+): void {
+  for (const [, entry] of prStatusCacheByRemote) {
+    entry.byBranch.delete(branch);
+  }
 }
 
 function extractCiCheckNodes(statusCheckRollup: any): any[] {

@@ -87,6 +87,7 @@ export function HotkeyHints() {
         pr.unresolvedThreads === 0;
       const hasOpenPr = pr && pr.state === "open";
       const branch = activeTask && gitStatuses[activeTask.id]?.branch;
+      const isMerged = pr && pr.state === "merged";
       const canCreatePr =
         !pr &&
         branch !== "main" &&
@@ -96,6 +97,7 @@ export function HotkeyHints() {
       const cursorHints = activeTask?.worktree_path ? ["n Cursor"] : [];
       const openPrHints = hasOpenPr ? ["m Open PR"] : [];
       const createPrHints = canCreatePr ? ["p Create PR"] : [];
+      const clearPrHints = isMerged ? ["p Clear PR"] : [];
       const prHints = hasIssues ? ["v PR Issues"] : [];
       const mergeHints = isGreen ? ["s Squash Merge"] : [];
       hints.push(
@@ -106,6 +108,7 @@ export function HotkeyHints() {
         ...cursorHints,
         ...openPrHints,
         ...createPrHints,
+        ...clearPrHints,
         ...prHints,
         ...mergeHints,
         "y Copy",

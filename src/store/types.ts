@@ -44,7 +44,7 @@ export interface PrStatus {
   ciPending: number;
 }
 
-export type TaskStatusColor = "green" | "red" | "orange" | "yellow" | "none";
+export type TaskStatusColor = "green" | "red" | "orange" | "yellow" | "purple" | "none";
 
 export interface GitStatus {
   branch: string;

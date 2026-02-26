@@ -146,6 +146,7 @@ export function TaskSwitcher() {
                     red={taskColor === "red" ? 1 : 0}
                     orange={taskColor === "orange" ? 1 : 0}
                     yellow={taskColor === "yellow" ? 1 : 0}
+                    purple={taskColor === "purple" ? 1 : 0}
                   />
                 ) : (
                   <Text> </Text>
@@ -181,6 +182,7 @@ export function TaskSwitcher() {
                     red={taskColor === "red" ? 1 : 0}
                     orange={taskColor === "orange" ? 1 : 0}
                     yellow={taskColor === "yellow" ? 1 : 0}
+                    purple={taskColor === "purple" ? 1 : 0}
                   />
                 ) : (
                   <Text> </Text>
