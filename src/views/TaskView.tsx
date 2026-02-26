@@ -11,7 +11,6 @@ import {
   formatPrStatus,
   getGitStatus,
   getGitStatusWithPr,
-  clearPrCacheForBranch,
 } from "../services/git.js";
 import { refreshAllTaskStatuses } from "../services/taskStatus.js";
 import {
@@ -286,18 +285,8 @@ export function TaskView() {
       const currentBranch = gitStatuses[activeTask.id]?.branch;
       if (currentBranch === "main" || currentBranch === "master") return;
       if (pr && pr.state === "merged") {
-        // Clear merged PR association
-        clearPrCacheForBranch(activeTask.worktree_path, currentBranch || "");
-        useStore.getState().setGitStatus(activeTask.id, {
-          ...(gitStatuses[activeTask.id] || {
-            branch: currentBranch || "",
-            ahead: 0,
-            behind: 0,
-            dirty: false,
-            pr: null,
-          }),
-          pr: null,
-        });
+        // Mark PR as cleared so polling doesn't bring it back
+        useStore.getState().markPrCleared(activeTask.id);
         useStore.getState().setTaskStatuses({
           ...useStore.getState().taskStatuses,
           [activeTask.id]: "none",

@@ -126,6 +126,7 @@ export interface AppState {
   gitStatuses: Record<string, GitStatus>;
   taskStatuses: Record<string, TaskStatusColor>;
   consoleInteractedTasks: Set<string>;
+  clearedPrTasks: Set<string>;
 
   // Actions
   setView: (view: ViewState) => void;
@@ -145,4 +146,6 @@ export interface AppState {
   setTaskStatuses: (statuses: Record<string, TaskStatusColor>) => void;
   markConsoleInteracted: (taskId: string) => void;
   clearConsoleInteracted: (taskId: string) => void;
+  markPrCleared: (taskId: string) => void;
+  clearPrCleared: (taskId: string) => void;
 }

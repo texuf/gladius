@@ -28,6 +28,7 @@ export const useStore = create<AppState>((set) => ({
   gitStatuses: {},
   taskStatuses: {},
   consoleInteractedTasks: new Set<string>(),
+  clearedPrTasks: new Set<string>(),
 
   // Actions
   setView: (view) => {
@@ -70,5 +71,17 @@ export const useStore = create<AppState>((set) => ({
       const next = new Set(state.consoleInteractedTasks);
       next.delete(taskId);
       return { consoleInteractedTasks: next };
+    }),
+  markPrCleared: (taskId) =>
+    set((state) => {
+      const next = new Set(state.clearedPrTasks);
+      next.add(taskId);
+      return { clearedPrTasks: next };
+    }),
+  clearPrCleared: (taskId) =>
+    set((state) => {
+      const next = new Set(state.clearedPrTasks);
+      next.delete(taskId);
+      return { clearedPrTasks: next };
     }),
 }));

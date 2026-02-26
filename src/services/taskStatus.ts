@@ -155,20 +155,25 @@ function resolveTaskStatusColor(
 
   if (llmStatus === "orange") return "orange";
 
+  const prCleared = useStore.getState().clearedPrTasks.has(taskId);
   const pr = gitStatus?.pr;
   if (pr) {
-    if (pr.hasConflicts || pr.unresolvedThreads > 0 || pr.ciFailed > 0) {
-      return "red";
-    }
-    if (pr.ciPending > 0) return "yellow";
-    if (pr.state === "merged") return "purple";
-    if (
-      pr.state === "open" &&
-      !pr.hasConflicts &&
-      pr.ciFailed === 0 &&
-      pr.unresolvedThreads === 0
-    ) {
-      return "green";
+    // If user cleared a merged PR, ignore it (but respect new open PRs)
+    if (prCleared && pr.state === "merged") {
+      // skip PR status
+    } else {
+      if (pr.state === "open") {
+        // New open PR appeared — auto-clear the "cleared" flag
+        if (prCleared) useStore.getState().clearPrCleared(taskId);
+        if (pr.hasConflicts || pr.unresolvedThreads > 0 || pr.ciFailed > 0) {
+          return "red";
+        }
+        if (pr.ciPending > 0) return "yellow";
+        if (!pr.hasConflicts && pr.ciFailed === 0 && pr.unresolvedThreads === 0) {
+          return "green";
+        }
+      }
+      if (pr.state === "merged") return "purple";
     }
   }
 
