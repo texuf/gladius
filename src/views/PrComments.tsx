@@ -84,11 +84,60 @@ export function PrComments() {
     );
   };
 
-  const pasteToConsoleAndSubmit = (text: string) => {
+  const pasteToConsoleAndSubmit = (taskId: string, text: string) => {
+    const consoleSessionId = `${taskId}-console`;
+    let promptSent = false;
+
+    const trySendPrompt = (): boolean => {
+      if (promptSent) return true;
+      const ok = writeToSession(consoleSessionId, text);
+      if (ok) promptSent = true;
+      return ok;
+    };
+
+    const trySendEnter = (): boolean => {
+      // Some CLIs/PTYs respond to CR, others to LF. Try both.
+      return writeToSession(consoleSessionId, "\r") || writeToSession(consoleSessionId, "\n");
+    };
+
+    if (!trySendPrompt()) {
+      let promptAttempts = 0;
+      const maxPromptAttempts = 40; // 2s
+      const promptRetry = setInterval(() => {
+        promptAttempts++;
+        if (trySendPrompt() || promptAttempts >= maxPromptAttempts) {
+          clearInterval(promptRetry);
+          if (promptSent) {
+            setTimeout(() => { trySendEnter(); }, 120);
+          }
+        }
+      }, 50);
+      return;
+    }
+
+    // Give the target CLI a beat to ingest pasted text before submit.
+    setTimeout(() => {
+      if (trySendEnter()) return;
+      let enterAttempts = 0;
+      const maxEnterAttempts = 20; // 1s
+      const enterRetry = setInterval(() => {
+        enterAttempts++;
+        if (trySendEnter() || enterAttempts >= maxEnterAttempts) {
+          clearInterval(enterRetry);
+        }
+      }, 50);
+    }, 120);
+  };
+
+  const returnToConsoleWithPrompt = (text: string) => {
     if (!activeTask) return;
-    const consoleSessionId = `${activeTask.id}-console`;
-    writeToSession(consoleSessionId, text);
-    writeToSession(consoleSessionId, "\r");
+    const taskId = activeTask.id;
+    goBack();
+    setTimeout(() => {
+      useStore.getState().setFocusPane("console");
+      useStore.getState().markConsoleInteracted(taskId);
+      pasteToConsoleAndSubmit(taskId, text);
+    }, 0);
   };
 
   useInput((input, key) => {
@@ -122,24 +171,15 @@ export function PrComments() {
           parts.push(formatThreadForPaste(t));
         }
       }
-      pasteToConsoleAndSubmit(parts.join("\n---\n\n"));
-      setFocusPane("console");
-      useStore.getState().markConsoleInteracted(activeTask.id);
-      goBack();
+      returnToConsoleWithPrompt(parts.join("\n---\n\n"));
       return;
     }
 
     if (input === "p" && activeTask) {
       if (selectedCi) {
-        pasteToConsoleAndSubmit(formatCiFailureForPaste(selectedCi));
-        setFocusPane("console");
-        useStore.getState().markConsoleInteracted(activeTask.id);
-        goBack();
+        returnToConsoleWithPrompt(formatCiFailureForPaste(selectedCi));
       } else if (selectedThread) {
-        pasteToConsoleAndSubmit(formatThreadForPaste(selectedThread));
-        setFocusPane("console");
-        useStore.getState().markConsoleInteracted(activeTask.id);
-        goBack();
+        returnToConsoleWithPrompt(formatThreadForPaste(selectedThread));
       }
       return;
     }
