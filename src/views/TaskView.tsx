@@ -260,6 +260,24 @@ export function TaskView() {
       return;
     }
 
+    // Open PR in browser
+    if (input === "m" && !key.super && !key.ctrl && activeTask?.worktree_path) {
+      void handleOpenPrInBrowser();
+      return;
+    }
+
+    // Open task worktree in Cursor
+    if (input === "n" && !key.super && !key.ctrl && activeTask?.worktree_path) {
+      void handleOpenCursor();
+      return;
+    }
+
+    // Open repo in Tower
+    if (input === "b" && !key.super && !key.ctrl && activeTask?.worktree_path) {
+      void handleOpenTower();
+      return;
+    }
+
     // Copy mode toggle
     if (input === "y" && !key.super) {
       setCopyMode(true);
@@ -289,6 +307,40 @@ export function TaskView() {
       await pollPr();
     } catch {}
     setFetching(false);
+  };
+
+  const handleOpenPrInBrowser = async () => {
+    if (!activeTask?.worktree_path) return;
+    const pr = gitStatuses[activeTask.id]?.pr;
+    if (!pr || pr.state !== "open") return;
+    try {
+      const remoteUrl = (await $`git -C ${activeTask.worktree_path} remote get-url origin`.text()).trim();
+      const prJson = await $`gh pr view ${pr.number} --repo ${remoteUrl} --json url`.text();
+      const { url } = JSON.parse(prJson) as { url?: string };
+      if (url) {
+        Bun.spawn(["open", url], { stdio: ["ignore", "ignore", "ignore"] });
+      }
+    } catch {}
+  };
+
+  const handleOpenTower = async () => {
+    if (!activeTask?.worktree_path) return;
+    try {
+      const repoRoot = (await $`git -C ${activeTask.worktree_path} rev-parse --show-toplevel`.text()).trim();
+      if (repoRoot) {
+        Bun.spawn(["gittower", repoRoot], { stdio: ["ignore", "ignore", "ignore"] });
+      }
+    } catch {}
+  };
+
+  const handleOpenCursor = async () => {
+    if (!activeTask?.worktree_path) return;
+    try {
+      Bun.spawn(["cursor", "."], {
+        cwd: activeTask.worktree_path,
+        stdio: ["ignore", "ignore", "ignore"],
+      });
+    } catch {}
   };
 
   const handleCloseTask = () => {

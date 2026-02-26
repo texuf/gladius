@@ -78,5 +78,8 @@ bun --watch run src/index.tsx
 | `co` | Select Codex (first selection) |
 | `l` | Switch to Claude |
 | `o` | Switch to Codex |
+| `b` | Open repo in Tower |
+| `n` | Open `cursor .` in task worktree |
+| `m` | Open PR in browser (if open) |
 | `Esc` | Unfocus pane / go back |
 | `x` | Close task |

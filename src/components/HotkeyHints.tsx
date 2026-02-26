@@ -60,8 +60,12 @@ export function HotkeyHints() {
       const pr = activeTask && gitStatuses[activeTask.id]?.pr;
       const hasIssues = pr && (pr.unresolvedThreads > 0 || pr.ciFailed > 0 || pr.ciPending > 0);
       const isGreen = pr && pr.state === "open" && pr.ciFailed === 0 && pr.ciPending === 0 && pr.unresolvedThreads === 0;
+      const hasOpenPr = pr && pr.state === "open";
       const branch = activeTask && gitStatuses[activeTask.id]?.branch;
       const canCreatePr = !pr && branch !== "main" && branch !== "master" && activeTask?.worktree_path;
+      const towerHints = activeTask?.worktree_path ? ["b Tower"] : [];
+      const cursorHints = activeTask?.worktree_path ? ["n Cursor"] : [];
+      const openPrHints = hasOpenPr ? ["m Open PR"] : [];
       const createPrHints = canCreatePr ? ["p Create PR"] : [];
       const prHints = hasIssues ? ["v PR Issues"] : [];
       const mergeHints = isGreen ? ["s Squash Merge"] : [];
@@ -69,6 +73,9 @@ export function HotkeyHints() {
         "i Notes",
         "t Terminal",
         ...modelHints,
+        ...towerHints,
+        ...cursorHints,
+        ...openPrHints,
         ...createPrHints,
         ...prHints,
         ...mergeHints,
