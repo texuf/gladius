@@ -1,7 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text, useInput } from "ink";
+import InkTextInput from "ink-text-input";
 import { useStore } from "../store/index.js";
-import { getAllProjects, addProject, deleteProject, touchProject } from "../services/db.js";
+import {
+  getAllProjects,
+  addProject,
+  deleteProject,
+  touchProject,
+  updateProjectGroup,
+} from "../services/db.js";
 import { getTasksForProject } from "../services/db.js";
 import { StatusDots } from "../components/StatusDots.js";
 import { EmbeddedTerminal, getCwd } from "../components/EmbeddedTerminal.js";
@@ -23,11 +30,18 @@ export function ProjectSelection() {
   const taskStatuses = useStore((s) => s.taskStatuses);
   const [error, setError] = useState("");
   const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
-  const [projectTaskIds, setProjectTaskIds] = useState<Record<string, string[]>>({});
+  const [projectTaskIds, setProjectTaskIds] = useState<
+    Record<string, string[]>
+  >({});
   const [confirmDelete, setConfirmDelete] = useState<Project | null>(null);
   const [terminalActive, setTerminalActive] = useState(false);
   const [capturedPath, setCapturedPath] = useState("");
   const [terminalError, setTerminalError] = useState("");
+  const [editingGroupProjectId, setEditingGroupProjectId] = useState<
+    string | null
+  >(null);
+  const [groupEditValue, setGroupEditValue] = useState("");
+  const [groupEditError, setGroupEditError] = useState("");
 
   // Load projects on mount
   useEffect(() => {
@@ -37,7 +51,9 @@ export function ProjectSelection() {
     const counts: Record<string, number> = {};
     const taskIds: Record<string, string[]> = {};
     for (const p of loaded) {
-      const active = getTasksForProject(p.id).filter((t) => t.status === "active");
+      const active = getTasksForProject(p.id).filter(
+        (t) => t.status === "active",
+      );
       counts[p.id] = active.length;
       taskIds[p.id] = active.map((t) => t.id);
     }
@@ -88,6 +104,15 @@ export function ProjectSelection() {
       return;
     }
 
+    if (editingGroupProjectId) {
+      if (key.escape) {
+        setEditingGroupProjectId(null);
+        setGroupEditValue("");
+        setGroupEditError("");
+      }
+      return;
+    }
+
     if (confirmDelete) {
       return;
     }
@@ -112,6 +137,13 @@ export function ProjectSelection() {
       if (project) {
         setConfirmDelete(project);
       }
+    } else if (input === "g" && projects.length > 0) {
+      const project = projects[selectedIndex];
+      if (project) {
+        setEditingGroupProjectId(project.id);
+        setGroupEditValue(project.group_name);
+        setGroupEditError("");
+      }
     }
   });
 
@@ -121,7 +153,7 @@ export function ProjectSelection() {
       : path;
 
     try {
-      const project = addProject(resolvedPath);
+      addProject(resolvedPath);
       const updated = getAllProjects();
       setProjects(updated);
       setAddingProject(false);
@@ -129,6 +161,29 @@ export function ProjectSelection() {
       setError("");
     } catch (e: any) {
       setError(e.message || "Failed to add project");
+    }
+  };
+
+  const handleGroupEditSubmit = (value: string) => {
+    if (!editingGroupProjectId) return;
+    const normalized = value.trim();
+    if (!normalized) {
+      setGroupEditError("Group name cannot be empty.");
+      return;
+    }
+
+    try {
+      updateProjectGroup(editingGroupProjectId, normalized);
+      const updated = getAllProjects();
+      const selectedProjectId = editingGroupProjectId;
+      setProjects(updated);
+      const nextIndex = updated.findIndex((p) => p.id === selectedProjectId);
+      setSelectedIndex(nextIndex === -1 ? 0 : nextIndex);
+      setEditingGroupProjectId(null);
+      setGroupEditValue("");
+      setGroupEditError("");
+    } catch (e: any) {
+      setGroupEditError(e.message || "Failed to update group.");
     }
   };
 
@@ -147,12 +202,15 @@ export function ProjectSelection() {
       <Box flexDirection="column" paddingX={1} flexGrow={1}>
         <Box marginBottom={1}>
           <Text bold color="cyan">
-            {" "}GLADIUS{" "}
+            {" "}
+            GLADIUS{" "}
           </Text>
-          <Text dimColor>  Add Project</Text>
+          <Text dimColor> Add Project</Text>
         </Box>
         <Box marginBottom={1}>
-          <Text dimColor>cd to your project directory, then press Esc to confirm</Text>
+          <Text dimColor>
+            cd to your project directory, then press Esc to confirm
+          </Text>
         </Box>
         <EmbeddedTerminal
           taskId="__add-project"
@@ -169,13 +227,14 @@ export function ProjectSelection() {
     <Box flexDirection="column" paddingX={1} flexGrow={1}>
       <Box marginBottom={1}>
         <Text bold color="cyan">
-          {" "}GLADIUS{" "}
+          {" "}
+          GLADIUS{" "}
         </Text>
       </Box>
 
       <Box justifyContent="space-between" marginBottom={1}>
         <Text bold>Projects</Text>
-        <Text dimColor>Ctrl+N: New  d: Delete</Text>
+        <Text dimColor>Ctrl+N: New g: Group d: Delete</Text>
       </Box>
 
       {projects.length === 0 && !addingProject && (
@@ -183,6 +242,9 @@ export function ProjectSelection() {
       )}
 
       {projects.map((project, i) => {
+        const previous = i > 0 ? projects[i - 1] : null;
+        const showGroupHeader =
+          !previous || previous.group_name !== project.group_name;
         const dots = { green: 0, red: 0, orange: 0, yellow: 0 };
         for (const tid of projectTaskIds[project.id] || []) {
           const c = taskStatuses[tid];
@@ -192,22 +254,32 @@ export function ProjectSelection() {
           else if (c === "yellow") dots.yellow++;
         }
         return (
-        <Box key={project.id} paddingLeft={1} justifyContent="space-between">
-          <Box>
-            <Text
-              color={i === selectedIndex ? "cyan" : undefined}
-              bold={i === selectedIndex}
-            >
-              {i === selectedIndex ? "▸ " : "  "}
-              {project.name}
-            </Text>
-            <Text dimColor>
-              {"  "}
-              {taskCounts[project.id] || 0} task{(taskCounts[project.id] || 0) !== 1 ? "s" : ""}
-            </Text>
+          <Box key={project.id} flexDirection="column">
+            {showGroupHeader && (
+              <Box paddingLeft={1} marginTop={i === 0 ? 0 : 1}>
+                <Text bold color="yellow">
+                  {project.group_name}
+                </Text>
+              </Box>
+            )}
+            <Box paddingLeft={1} justifyContent="space-between">
+              <Box>
+                <Text
+                  color={i === selectedIndex ? "cyan" : undefined}
+                  bold={i === selectedIndex}
+                >
+                  {i === selectedIndex ? "▸ " : "  "}
+                  {project.name}
+                </Text>
+                <Text dimColor>
+                  {"  "}
+                  {taskCounts[project.id] || 0} task
+                  {(taskCounts[project.id] || 0) !== 1 ? "s" : ""}
+                </Text>
+              </Box>
+              <StatusDots {...dots} />
+            </Box>
           </Box>
-          <StatusDots {...dots} />
-        </Box>
         );
       })}
 
@@ -220,13 +292,24 @@ export function ProjectSelection() {
       )}
 
       {addingProject && !terminalActive && terminalError && (
-        <Box flexDirection="column" marginTop={1} borderStyle="single" borderColor="red" paddingX={1} paddingY={1}>
-          <Text bold color="red">Terminal Error</Text>
+        <Box
+          flexDirection="column"
+          marginTop={1}
+          borderStyle="single"
+          borderColor="red"
+          paddingX={1}
+          paddingY={1}
+        >
+          <Text bold color="red">
+            Terminal Error
+          </Text>
           <Box marginTop={1}>
             <Text color="red">{terminalError}</Text>
           </Box>
           <Box marginTop={1}>
-            <Text dimColor>Try closing unused terminal tabs to free PTY devices.</Text>
+            <Text dimColor>
+              Try closing unused terminal tabs to free PTY devices.
+            </Text>
           </Box>
           <Box marginTop={1}>
             <Text dimColor>Esc Cancel</Text>
@@ -235,7 +318,14 @@ export function ProjectSelection() {
       )}
 
       {addingProject && !terminalActive && !terminalError && (
-        <Box flexDirection="column" marginTop={1} borderStyle="single" borderColor="cyan" paddingX={1} paddingY={1}>
+        <Box
+          flexDirection="column"
+          marginTop={1}
+          borderStyle="single"
+          borderColor="cyan"
+          paddingX={1}
+          paddingY={1}
+        >
           <Text bold color="cyan">
             Add project at:
           </Text>
@@ -248,7 +338,38 @@ export function ProjectSelection() {
             </Box>
           )}
           <Box marginTop={1}>
-            <Text dimColor>⏎ Add  Esc Cancel</Text>
+            <Text dimColor>⏎ Add Esc Cancel</Text>
+          </Box>
+        </Box>
+      )}
+
+      {editingGroupProjectId && (
+        <Box
+          flexDirection="column"
+          marginTop={1}
+          borderStyle="single"
+          borderColor="yellow"
+          paddingX={1}
+          paddingY={1}
+        >
+          <Text bold color="yellow">
+            Edit project group
+          </Text>
+          <Box marginTop={1}>
+            <Text>Group: </Text>
+            <InkTextInput
+              value={groupEditValue}
+              onChange={setGroupEditValue}
+              onSubmit={handleGroupEditSubmit}
+            />
+          </Box>
+          {groupEditError && (
+            <Box marginTop={1}>
+              <Text color="red">{groupEditError}</Text>
+            </Box>
+          )}
+          <Box marginTop={1}>
+            <Text dimColor>⏎ Save Esc Cancel</Text>
           </Box>
         </Box>
       )}

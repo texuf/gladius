@@ -2,6 +2,7 @@ export interface Project {
   id: string;
   name: string;
   path: string;
+  group_name: string;
   created_at: string;
   last_accessed_at: string;
 }
@@ -58,7 +59,14 @@ export interface Reviewer {
   handle: string;
 }
 
-export type ViewState = "projects" | "tasks" | "taskView" | "taskSwitcher" | "prComments" | "settings" | "createPr";
+export type ViewState =
+  | "projects"
+  | "tasks"
+  | "taskView"
+  | "taskSwitcher"
+  | "prComments"
+  | "settings"
+  | "createPr";
 
 export type FocusPane = "none" | "notes" | "terminal" | "console";
 
@@ -78,10 +86,10 @@ export interface ReviewComment {
 }
 
 export interface CiCheckFailure {
-  name: string;              // Job name e.g. "Common_CI"
+  name: string; // Job name e.g. "Common_CI"
   failedStep: string | null; // Step name e.g. "Prettier"
   detailsUrl: string;
-  log: string;               // Extracted log output for the failed step
+  log: string; // Extracted log output for the failed step
 }
 
 export type ModalState =
