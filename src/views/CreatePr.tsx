@@ -73,6 +73,7 @@ export function CreatePr() {
         // Load reviewers from app_state
         const globalJson = getAppState("reviewers.global");
         const reviewers: Reviewer[] = globalJson ? JSON.parse(globalJson) : [];
+        reviewers.sort((a, b) => a.name.localeCompare(b.name));
         setGlobalReviewers(reviewers);
 
         // Load project defaults
@@ -161,11 +162,11 @@ export function CreatePr() {
     if (!trimHandle) return;
 
     const reviewer: Reviewer = { name: trimName || trimHandle, handle: trimHandle };
-    const updated = [...globalReviewers, reviewer];
+    const updated = [...globalReviewers, reviewer].sort((a, b) => a.name.localeCompare(b.name));
     setGlobalReviewers(updated);
     setAppState("reviewers.global", JSON.stringify(updated));
     setSelectedHandles((prev) => new Set([...prev, trimHandle]));
-    setReviewerIndex(updated.length - 1);
+    setReviewerIndex(updated.findIndex((r) => r.handle === trimHandle));
   };
 
   // Text input active in these phases
