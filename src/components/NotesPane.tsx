@@ -25,21 +25,21 @@ export function NotesPane() {
     setFocusPane("none");
   };
 
-  return (
-    <Box
-      flexDirection="column"
-      borderStyle={isEditing ? "double" : "single"}
-      borderColor={isEditing ? "cyan" : "gray"}
-      paddingX={1}
-      width="100%"
-    >
-      <Box justifyContent="space-between">
-        <Text bold color={isEditing ? "cyan" : undefined}>
-          Notes
-        </Text>
-        <Text dimColor>i: edit</Text>
-      </Box>
-      {isEditing ? (
+  if (isEditing) {
+    return (
+      <Box
+        flexDirection="column"
+        borderStyle="double"
+        borderColor="cyan"
+        paddingX={1}
+        width="100%"
+      >
+        <Box justifyContent="space-between">
+          <Text bold color="cyan">
+            Notes
+          </Text>
+          <Text dimColor>⏎ Save  Esc Cancel</Text>
+        </Box>
         <Box marginTop={1}>
           <InkTextInput
             value={editValue}
@@ -47,9 +47,21 @@ export function NotesPane() {
             onSubmit={handleSubmit}
           />
         </Box>
-      ) : (
-        <Text wrap="wrap">{activeTask.description}</Text>
-      )}
+      </Box>
+    );
+  }
+
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="single"
+      borderColor="gray"
+      paddingX={1}
+      width="100%"
+    >
+      <Text bold color="cyan" wrap="wrap">
+        {(activeTask.description || "").toUpperCase()}
+      </Text>
     </Box>
   );
 }

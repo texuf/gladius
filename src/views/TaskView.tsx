@@ -437,7 +437,7 @@ export function TaskView() {
       {/* Header */}
       <Box justifyContent="space-between" marginBottom={1}>
         <Box>
-          <Text bold color="cyan">
+          <Text dimColor>
             {activeTask.label}
           </Text>
           {copyMode && (
@@ -450,7 +450,7 @@ export function TaskView() {
             <Text dimColor> Fetching...</Text>
           ) : (
             <>
-              {gitStatus && <Text dimColor> {formatGitStatus(gitStatus)}</Text>}
+              {gitStatus && <Text color="cyan"> {formatGitStatus(gitStatus)}</Text>}
               {gitStatus?.pr && (
                 <Text
                   color={
