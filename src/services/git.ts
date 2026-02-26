@@ -811,6 +811,57 @@ export async function getCommitsSince(
   }
 }
 
+/**
+ * Get commits since a given timestamp on a specific remote branch.
+ * Works even if the worktree has been deleted — uses origin/<branch>.
+ */
+export async function getCommitsSinceOnBranch(
+  repoPath: string,
+  branch: string,
+  sinceISO: string,
+): Promise<string> {
+  try {
+    return (
+      await $`git -C ${repoPath} log origin/${branch} --since=${sinceISO} --pretty=format:%h %s`.text()
+    ).trim();
+  } catch {
+    return "";
+  }
+}
+
+export interface MergedPr {
+  number: number;
+  title: string;
+  body: string;
+  headRefName: string;
+}
+
+/**
+ * Get recently merged PRs since a given timestamp using gh CLI.
+ */
+export async function getMergedPrsSince(
+  repoPath: string,
+  sinceISO: string,
+): Promise<MergedPr[]> {
+  try {
+    const remoteUrl = (
+      await $`git -C ${repoPath} remote get-url origin`.text()
+    ).trim();
+    const raw =
+      await $`gh pr list --repo ${remoteUrl} --state merged --search ${"merged:>=" + sinceISO.slice(0, 10)} --json number,title,body,headRefName --limit 50`.text();
+    const prs = JSON.parse(raw);
+    if (!Array.isArray(prs)) return [];
+    return prs.map((pr: any) => ({
+      number: pr.number ?? 0,
+      title: pr.title ?? "",
+      body: pr.body ?? "",
+      headRefName: pr.headRefName ?? "",
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export function formatPrStatus(pr: PrStatus): string {
   const state =
     pr.state === "open" ? "OPEN" : pr.state === "merged" ? "MERGED" : "CLOSED";

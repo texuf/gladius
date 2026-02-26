@@ -20,7 +20,7 @@ export function Standup() {
     setCopied(false);
     setSinceLabel(getStandupWindowStart());
 
-    const apiKey = getAppState("openai_api_key");
+    const apiKey = getAppState("settings.openai_api_key");
     if (!apiKey) {
       setErrorMsg(
         "No OpenAI API key configured. Press 's' from Project Selection to open Settings.",
