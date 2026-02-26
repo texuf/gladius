@@ -109,11 +109,13 @@ export function TaskView() {
       }));
     });
   };
-  const pollPr = () => {
+  const pollPr = (forceRefresh = false) => {
     if (!activeTask?.worktree_path) return Promise.resolve();
-    if (prInFlightRef.current) return Promise.resolve();
+    if (prInFlightRef.current && !forceRefresh) return Promise.resolve();
     prInFlightRef.current = true;
-    return getGitStatusWithPr(activeTask.worktree_path)
+    return getGitStatusWithPr(activeTask.worktree_path, undefined, {
+      forcePrRefresh: forceRefresh,
+    })
       .then((status) => {
         setGitStatus(activeTask.id, status);
         // Stop polling once checks are settled (nothing pending)
@@ -228,7 +230,7 @@ export function TaskView() {
       if (prIntervalRef.current) clearInterval(prIntervalRef.current);
       // Use pollPr only — it fetches full git status + PR in one call,
       // avoiding the race where pollGit overwrites fresh PR data
-      pollPr().then(() => {
+      pollPr(true).then(() => {
         setFetching(false);
         gitIntervalRef.current = setInterval(pollGit, 5000);
         // Only restart PR polling if checks are still pending

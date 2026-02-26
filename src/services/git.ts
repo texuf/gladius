@@ -77,9 +77,14 @@ export async function getGitStatus(
 export async function getGitStatusWithPr(
   repoPath: string,
   branchName?: string,
+  options?: { forcePrRefresh?: boolean },
 ): Promise<GitStatus> {
   const status = await getGitStatus(repoPath, branchName);
-  status.pr = await getPrStatus(repoPath, status.branch);
+  status.pr = await getPrStatus(
+    repoPath,
+    status.branch,
+    options?.forcePrRefresh === true,
+  );
   return status;
 }
 
@@ -89,6 +94,7 @@ export async function getGitStatusWithPr(
 async function getPrStatus(
   repoPath: string,
   branch: string,
+  forceRefresh = false,
 ): Promise<PrStatus | null> {
   try {
     const remoteUrl = (
@@ -101,6 +107,7 @@ async function getPrStatus(
       remoteUrl,
       parsed.owner,
       parsed.repo,
+      forceRefresh,
     );
     return byBranch.get(branch) || null;
   } catch {
@@ -115,15 +122,16 @@ async function getOpenPrStatusesForRepo(
   remoteUrl: string,
   owner: string,
   repo: string,
+  forceRefresh = false,
 ): Promise<Map<string, PrStatus>> {
   const now = Date.now();
   const cached = prStatusCacheByRemote.get(remoteUrl);
-  if (cached && cached.expiresAt > now) {
+  if (!forceRefresh && cached && cached.expiresAt > now) {
     return cached.byBranch;
   }
 
   const inFlight = prStatusInFlightByRemote.get(remoteUrl);
-  if (inFlight) {
+  if (!forceRefresh && inFlight) {
     return inFlight;
   }
 
