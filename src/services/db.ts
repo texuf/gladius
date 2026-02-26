@@ -167,7 +167,7 @@ export function getAllProjects(): Project[] {
     .all() as Project[];
 }
 
-export function addProject(path: string): Project {
+export function addProject(path: string, groupName?: string): Project {
   if (!existsSync(path)) {
     throw new Error(`Directory does not exist: ${path}`);
   }
@@ -176,7 +176,7 @@ export function addProject(path: string): Project {
   }
   const db = getDb();
   const name = path.replace(homedir(), "~").replace(/^~\//, "");
-  const group_name = deriveProjectGroup(path);
+  const group_name = groupName?.trim() || deriveProjectGroup(path);
   const now = new Date().toISOString();
   const project: Project = {
     id: uuid(),

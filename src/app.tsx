@@ -87,6 +87,11 @@ export function App() {
     useStore.getState().setView(resolveRestoredView(savedView, true, hasTask));
   }, []);
 
+  // Clear screen on view change to prevent stale content above
+  useEffect(() => {
+    process.stdout.write("\x1b[2J\x1b[H");
+  }, [view]);
+
   // Poll task statuses globally (LLM activity + PR status)
   useEffect(() => {
     const poll = () => {
