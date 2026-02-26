@@ -1,7 +1,11 @@
 import React, { useEffect } from "react";
 import { Box, Text, useInput, useApp } from "ink";
 import { useStore } from "./store/index.js";
-import { getAppState, getProjectById, getTasksForProject } from "./services/db.js";
+import {
+  getAppState,
+  getProjectById,
+  getTasksForProject,
+} from "./services/db.js";
 import { ProjectSelection } from "./views/ProjectSelection.js";
 import { TaskList } from "./views/TaskList.js";
 import { TaskView } from "./views/TaskView.js";
@@ -26,7 +30,7 @@ export function App() {
   const resolveRestoredView = (
     savedView: ViewState | null,
     hasProject: boolean,
-    hasTask: boolean
+    hasTask: boolean,
   ): ViewState => {
     const preferred = savedView ?? (hasProject ? "tasks" : "projects");
 
@@ -69,7 +73,9 @@ export function App() {
     useStore.getState().setTasks(tasks);
 
     if (savedTaskId) {
-      const task = tasks.find((t) => t.id === savedTaskId && t.status === "active");
+      const task = tasks.find(
+        (t) => t.id === savedTaskId && t.status === "active",
+      );
       if (task) {
         useStore.getState().setActiveTask(task);
       }

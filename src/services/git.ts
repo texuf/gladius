@@ -1,10 +1,32 @@
 import { $ } from "bun";
-import type { GitStatus, PrStatus, ReviewThread, CiCheckFailure } from "../store/types.js";
+import type {
+  GitStatus,
+  PrStatus,
+  ReviewThread,
+  CiCheckFailure,
+} from "../store/types.js";
+
+const PR_STATUS_CACHE_TTL_MS = 30_000;
+const PR_STATUS_ERROR_TTL_MS = 5_000;
+
+type PrStatusCacheEntry = {
+  expiresAt: number;
+  byBranch: Map<string, PrStatus>;
+};
+
+const prStatusCacheByRemote = new Map<string, PrStatusCacheEntry>();
+const prStatusInFlightByRemote = new Map<
+  string,
+  Promise<Map<string, PrStatus>>
+>();
 
 /**
  * Get git status information for a given repo path.
  */
-export async function getGitStatus(repoPath: string, branchName?: string): Promise<GitStatus> {
+export async function getGitStatus(
+  repoPath: string,
+  branchName?: string,
+): Promise<GitStatus> {
   const branch = branchName || (await getCurrentBranch(repoPath));
 
   let ahead = 0;
@@ -14,7 +36,8 @@ export async function getGitStatus(repoPath: string, branchName?: string): Promi
 
   try {
     // Ahead/behind remote tracking branch
-    const revList = await $`git -C ${repoPath} rev-list --left-right --count ${branch}...origin/${branch} 2>/dev/null`.text();
+    const revList =
+      await $`git -C ${repoPath} rev-list --left-right --count ${branch}...origin/${branch} 2>/dev/null`.text();
     const parts = revList.trim().split(/\s+/);
     if (parts.length === 2) {
       ahead = parseInt(parts[0], 10) || 0;
@@ -26,7 +49,8 @@ export async function getGitStatus(repoPath: string, branchName?: string): Promi
 
   try {
     // Behind main
-    const behindMainResult = await $`git -C ${repoPath} rev-list --count HEAD..origin/main 2>/dev/null`.text();
+    const behindMainResult =
+      await $`git -C ${repoPath} rev-list --count HEAD..origin/main 2>/dev/null`.text();
     behindMain = parseInt(behindMainResult.trim(), 10) || 0;
   } catch {
     // No origin/main
@@ -50,7 +74,10 @@ export async function getGitStatus(repoPath: string, branchName?: string): Promi
  * Get git status + PR status together. PR fetch is separate so a slow/failing
  * gh call doesn't block the core git status.
  */
-export async function getGitStatusWithPr(repoPath: string, branchName?: string): Promise<GitStatus> {
+export async function getGitStatusWithPr(
+  repoPath: string,
+  branchName?: string,
+): Promise<GitStatus> {
   const status = await getGitStatus(repoPath, branchName);
   status.pr = await getPrStatus(repoPath, status.branch);
   return status;
@@ -59,50 +86,203 @@ export async function getGitStatusWithPr(repoPath: string, branchName?: string):
 /**
  * Get PR status for a branch using gh CLI.
  */
-async function getPrStatus(repoPath: string, branch: string): Promise<PrStatus | null> {
+async function getPrStatus(
+  repoPath: string,
+  branch: string,
+): Promise<PrStatus | null> {
   try {
-    const remoteUrl = (await $`git -C ${repoPath} remote get-url origin`.text()).trim();
-    const json = await $`gh pr view ${branch} --repo ${remoteUrl} --json number,state,statusCheckRollup`.text();
-    const data = JSON.parse(json);
+    const remoteUrl = (
+      await $`git -C ${repoPath} remote get-url origin`.text()
+    ).trim();
+    const parsed = parseOwnerRepo(remoteUrl);
+    if (!parsed) return null;
 
-    // CI check counts — filter out ghost entries with null name/status
-    const checks = Array.isArray(data.statusCheckRollup)
-      ? data.statusCheckRollup.filter((c: any) => c.name || c.status)
-      : [];
-    const ciFailed = checks.filter((c: any) => c.conclusion === "FAILURE").length;
-    const ciPassed = checks.filter((c: any) => c.conclusion === "SUCCESS").length;
-    const ciPending = checks.filter((c: any) => c.conclusion !== "FAILURE" && c.conclusion !== "SUCCESS" && c.conclusion !== "SKIPPED").length;
-
-    // Unresolved review threads via GraphQL
-    let unresolvedThreads = 0;
-    try {
-      // Parse owner/repo from remote URL (ssh or https)
-      const match = remoteUrl.match(/[:/]([^/]+)\/([^/.]+?)(?:\.git)?$/);
-      if (match) {
-        const [, owner, repo] = match;
-        const gql = await $`gh api graphql -f query=${'query { repository(owner: "' + owner + '", name: "' + repo + '") { pullRequest(number: ' + data.number + ') { reviewThreads(first: 100) { nodes { isResolved } } } } }'}`.text();
-        const gqlData = JSON.parse(gql);
-        const threads = gqlData?.data?.repository?.pullRequest?.reviewThreads?.nodes || [];
-        unresolvedThreads = threads.filter((t: any) => !t.isResolved).length;
-      }
-    } catch {}
-
-    return {
-      number: data.number,
-      state: data.state === "MERGED" ? "merged" : data.state === "CLOSED" ? "closed" : "open",
-      unresolvedThreads,
-      ciPassed,
-      ciFailed,
-      ciPending,
-    };
+    const byBranch = await getOpenPrStatusesForRepo(
+      remoteUrl,
+      parsed.owner,
+      parsed.repo,
+    );
+    return byBranch.get(branch) || null;
   } catch {
     return null;
   }
 }
 
+/**
+ * Fetch and cache open PR statuses for a repository in one GraphQL call.
+ */
+async function getOpenPrStatusesForRepo(
+  remoteUrl: string,
+  owner: string,
+  repo: string,
+): Promise<Map<string, PrStatus>> {
+  const now = Date.now();
+  const cached = prStatusCacheByRemote.get(remoteUrl);
+  if (cached && cached.expiresAt > now) {
+    return cached.byBranch;
+  }
+
+  const inFlight = prStatusInFlightByRemote.get(remoteUrl);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const query = `query {
+    repository(owner: "${owner}", name: "${repo}") {
+      pullRequests(first: 100, states: OPEN, orderBy: { field: UPDATED_AT, direction: DESC }) {
+        nodes {
+          number
+          state
+          headRefName
+          statusCheckRollup {
+            contexts(first: 100) {
+              nodes {
+                __typename
+                ... on CheckRun {
+                  name
+                  status
+                  conclusion
+                }
+                ... on StatusContext {
+                  context
+                  state
+                }
+              }
+            }
+          }
+          reviewThreads(first: 100) {
+            nodes {
+              isResolved
+            }
+          }
+        }
+      }
+    }
+  }`;
+
+  const fetchPromise = (async () => {
+    try {
+      const raw = await $`gh api graphql -f query=${query}`.text();
+      const data = JSON.parse(raw);
+      const prs = data?.data?.repository?.pullRequests?.nodes || [];
+      const byBranch = new Map<string, PrStatus>();
+
+      for (const pr of prs) {
+        const headRefName = pr?.headRefName;
+        if (!headRefName || typeof pr?.number !== "number") continue;
+
+        const checks = extractCiCheckNodes(pr?.statusCheckRollup);
+        const { ciPassed, ciFailed, ciPending } = summarizeCiChecks(checks);
+        const threads = Array.isArray(pr?.reviewThreads?.nodes)
+          ? pr.reviewThreads.nodes
+          : [];
+        const unresolvedThreads = threads.filter(
+          (t: any) => !t?.isResolved,
+        ).length;
+
+        byBranch.set(headRefName, {
+          number: pr.number,
+          state: normalizePrState(pr?.state),
+          unresolvedThreads,
+          ciPassed,
+          ciFailed,
+          ciPending,
+        });
+      }
+
+      prStatusCacheByRemote.set(remoteUrl, {
+        expiresAt: Date.now() + PR_STATUS_CACHE_TTL_MS,
+        byBranch,
+      });
+
+      return byBranch;
+    } catch {
+      // Avoid hammering the API on repeated failures.
+      const empty = new Map<string, PrStatus>();
+      prStatusCacheByRemote.set(remoteUrl, {
+        expiresAt: Date.now() + PR_STATUS_ERROR_TTL_MS,
+        byBranch: empty,
+      });
+      return empty;
+    } finally {
+      prStatusInFlightByRemote.delete(remoteUrl);
+    }
+  })();
+
+  prStatusInFlightByRemote.set(remoteUrl, fetchPromise);
+  return fetchPromise;
+}
+
+function extractCiCheckNodes(statusCheckRollup: any): any[] {
+  const nodes = statusCheckRollup?.contexts?.nodes;
+  if (Array.isArray(nodes)) return nodes;
+  if (Array.isArray(statusCheckRollup)) return statusCheckRollup;
+  return [];
+}
+
+function summarizeCiChecks(checks: any[]): {
+  ciPassed: number;
+  ciFailed: number;
+  ciPending: number;
+} {
+  let ciPassed = 0;
+  let ciFailed = 0;
+  let ciPending = 0;
+
+  for (const check of checks) {
+    if (!check) continue;
+
+    const typename =
+      typeof check.__typename === "string" ? check.__typename : "";
+    if (typename === "CheckRun") {
+      const conclusion = String(check.conclusion || "").toUpperCase();
+      if (conclusion === "FAILURE") {
+        ciFailed += 1;
+      } else if (conclusion === "SUCCESS") {
+        ciPassed += 1;
+      } else if (conclusion !== "SKIPPED") {
+        ciPending += 1;
+      }
+      continue;
+    }
+
+    if (typename === "StatusContext") {
+      const state = String(check.state || "").toUpperCase();
+      if (state === "SUCCESS") {
+        ciPassed += 1;
+      } else if (state === "FAILURE" || state === "ERROR") {
+        ciFailed += 1;
+      } else {
+        ciPending += 1;
+      }
+      continue;
+    }
+
+    // Fallback path for unexpected payload shapes.
+    const conclusion = String(check.conclusion || "").toUpperCase();
+    const state = String(check.state || check.status || "").toUpperCase();
+    if (conclusion === "FAILURE" || state === "FAILURE" || state === "ERROR") {
+      ciFailed += 1;
+    } else if (conclusion === "SUCCESS" || state === "SUCCESS") {
+      ciPassed += 1;
+    } else if (conclusion !== "SKIPPED") {
+      ciPending += 1;
+    }
+  }
+
+  return { ciPassed, ciFailed, ciPending };
+}
+
+function normalizePrState(state: string): "open" | "closed" | "merged" {
+  if (state === "MERGED") return "merged";
+  if (state === "CLOSED") return "closed";
+  return "open";
+}
+
 export async function getCurrentBranch(repoPath: string): Promise<string> {
   try {
-    const result = await $`git -C ${repoPath} rev-parse --abbrev-ref HEAD`.text();
+    const result =
+      await $`git -C ${repoPath} rev-parse --abbrev-ref HEAD`.text();
     return result.trim();
   } catch {
     return "unknown";
@@ -125,7 +305,9 @@ export function formatGitStatus(status: GitStatus): string {
   }
 
   if (status.changedFiles > 0) {
-    parts.push(`${status.changedFiles} file${status.changedFiles !== 1 ? "s" : ""}`);
+    parts.push(
+      `${status.changedFiles} file${status.changedFiles !== 1 ? "s" : ""}`,
+    );
   }
 
   return parts.join(" ");
@@ -134,7 +316,9 @@ export function formatGitStatus(status: GitStatus): string {
 /**
  * Parse owner/repo from a git remote URL (ssh or https).
  */
-function parseOwnerRepo(remoteUrl: string): { owner: string; repo: string } | null {
+function parseOwnerRepo(
+  remoteUrl: string,
+): { owner: string; repo: string } | null {
   const match = remoteUrl.match(/[:/]([^/]+)\/([^/.]+?)(?:\.git)?$/);
   if (!match) return null;
   return { owner: match[1], repo: match[2] };
@@ -145,18 +329,20 @@ function parseOwnerRepo(remoteUrl: string): { owner: string; repo: string } | nu
  */
 function cleanCommentBody(body: string): string {
   // If description markers exist, extract between them
-  const descMatch = body.match(/<!-- DESCRIPTION START -->([\s\S]*?)<!-- DESCRIPTION END -->/);
+  const descMatch = body.match(
+    /<!-- DESCRIPTION START -->([\s\S]*?)<!-- DESCRIPTION END -->/,
+  );
   const extracted = descMatch?.[1]?.trim();
   if (extracted) {
     body = extracted;
   }
 
   const cleaned = body
-    .replace(/<!--[\s\S]*?-->/g, "")                    // HTML comments
+    .replace(/<!--[\s\S]*?-->/g, "") // HTML comments
     // Strip container tags but keep their inner text (some bots put useful text in <details>/<summary>)
     .replace(/<\/?(details|summary|picture|a)\b[^>]*>/gi, "")
-    .replace(/<\/?[^>]+>/g, "")                          // remaining HTML tags
-    .replace(/\n{3,}/g, "\n\n")                          // collapse blank lines
+    .replace(/<\/?[^>]+>/g, "") // remaining HTML tags
+    .replace(/\n{3,}/g, "\n\n") // collapse blank lines
     .trim();
 
   return cleaned;
@@ -165,15 +351,21 @@ function cleanCommentBody(body: string): string {
 /**
  * Fetch unresolved PR review threads with full comment bodies.
  */
-export async function getPrComments(repoPath: string, branch?: string): Promise<ReviewThread[]> {
+export async function getPrComments(
+  repoPath: string,
+  branch?: string,
+): Promise<ReviewThread[]> {
   try {
     const branchName = branch || (await getCurrentBranch(repoPath));
-    const remoteUrl = (await $`git -C ${repoPath} remote get-url origin`.text()).trim();
+    const remoteUrl = (
+      await $`git -C ${repoPath} remote get-url origin`.text()
+    ).trim();
     const parsed = parseOwnerRepo(remoteUrl);
     if (!parsed) return [];
 
     // Get PR number first
-    const prJson = await $`gh pr view ${branchName} --repo ${remoteUrl} --json number`.text();
+    const prJson =
+      await $`gh pr view ${branchName} --repo ${remoteUrl} --json number`.text();
     const { number: prNumber } = JSON.parse(prJson);
 
     const query = `query {
@@ -201,7 +393,8 @@ export async function getPrComments(repoPath: string, branch?: string): Promise<
 
     const gql = await $`gh api graphql -f query=${query}`.text();
     const data = JSON.parse(gql);
-    const threads = data?.data?.repository?.pullRequest?.reviewThreads?.nodes || [];
+    const threads =
+      data?.data?.repository?.pullRequest?.reviewThreads?.nodes || [];
 
     return threads
       .filter((t: any) => !t.isResolved)
@@ -241,13 +434,15 @@ export async function resolveThread(threadId: string): Promise<boolean> {
  */
 function extractFailedStepLog(rawLog: string, stepName: string): string {
   const sanitizeLogLine = (line: string): string => {
-    return line
-      // ANSI CSI sequences
-      .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")
-      // ANSI OSC sequences
-      .replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g, "")
-      // Remaining control chars (except tab)
-      .replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, "");
+    return (
+      line
+        // ANSI CSI sequences
+        .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")
+        // ANSI OSC sequences
+        .replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g, "")
+        // Remaining control chars (except tab)
+        .replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, "")
+    );
   };
 
   const lines = rawLog.split("\n");
@@ -260,7 +455,10 @@ function extractFailedStepLog(rawLog: string, stepName: string): string {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (stepStart === -1) {
-      if (line.includes("##[group]") && line.toLowerCase().includes(stepLower)) {
+      if (
+        line.includes("##[group]") &&
+        line.toLowerCase().includes(stepLower)
+      ) {
         stepStart = i;
       }
       continue;
@@ -295,8 +493,12 @@ function extractFailedStepLog(rawLog: string, stepName: string): string {
   }
 
   // Determine the range to extract: up to 60 lines before the error, through lines after
-  const end = errorLine !== -1 ? Math.min(errorLine + 20, lines.length) : lines.length;
-  const tailStart = errorLine !== -1 ? Math.max(stepStart + 1, errorLine - 60) : Math.max(stepStart + 1, end - 60);
+  const end =
+    errorLine !== -1 ? Math.min(errorLine + 20, lines.length) : lines.length;
+  const tailStart =
+    errorLine !== -1
+      ? Math.max(stepStart + 1, errorLine - 60)
+      : Math.max(stepStart + 1, end - 60);
 
   const result: string[] = [];
   for (let i = tailStart; i < end; i++) {
@@ -318,15 +520,21 @@ function extractFailedStepLog(rawLog: string, stepName: string): string {
  * Fetch CI check failures with log output for a PR.
  * Uses the Actions API to get workflow runs → jobs → failed steps → logs.
  */
-export async function getCiFailures(repoPath: string, branch?: string): Promise<CiCheckFailure[]> {
+export async function getCiFailures(
+  repoPath: string,
+  branch?: string,
+): Promise<CiCheckFailure[]> {
   try {
     const branchName = branch || (await getCurrentBranch(repoPath));
-    const remoteUrl = (await $`git -C ${repoPath} remote get-url origin`.text()).trim();
+    const remoteUrl = (
+      await $`git -C ${repoPath} remote get-url origin`.text()
+    ).trim();
     const parsed = parseOwnerRepo(remoteUrl);
     if (!parsed) return [];
 
     // Get head SHA from PR
-    const prJson = await $`gh pr view ${branchName} --repo ${remoteUrl} --json headRefOid`.text();
+    const prJson =
+      await $`gh pr view ${branchName} --repo ${remoteUrl} --json headRefOid`.text();
     const { headRefOid: sha } = JSON.parse(prJson);
 
     // Get failed workflow runs for this commit
@@ -338,25 +546,31 @@ export async function getCiFailures(repoPath: string, branch?: string): Promise<
     // Get failed jobs across all failed runs in parallel
     const jobResults = await Promise.all(
       (runs as any[]).map(async (run: any) => {
-        const jobsJson = await $`gh api repos/${parsed.owner}/${parsed.repo}/actions/runs/${run.id}/jobs`.text();
+        const jobsJson =
+          await $`gh api repos/${parsed.owner}/${parsed.repo}/actions/runs/${run.id}/jobs`.text();
         const { jobs } = JSON.parse(jobsJson);
-        return (jobs || []).filter((j: any) => j.conclusion === "failure").map((j: any) => ({
-          ...j,
-          runUrl: run.html_url,
-        }));
-      })
+        return (jobs || [])
+          .filter((j: any) => j.conclusion === "failure")
+          .map((j: any) => ({
+            ...j,
+            runUrl: run.html_url,
+          }));
+      }),
     );
     const failedJobs = jobResults.flat();
 
     // Fetch logs for each failed job in parallel
     const results: CiCheckFailure[] = await Promise.all(
       failedJobs.map(async (job: any): Promise<CiCheckFailure> => {
-        const failedStep = (job.steps || []).find((s: any) => s.conclusion === "failure");
+        const failedStep = (job.steps || []).find(
+          (s: any) => s.conclusion === "failure",
+        );
         let log = "";
 
         if (failedStep) {
           try {
-            const rawLog = await $`gh api repos/${parsed.owner}/${parsed.repo}/actions/jobs/${job.id}/logs`.text();
+            const rawLog =
+              await $`gh api repos/${parsed.owner}/${parsed.repo}/actions/jobs/${job.id}/logs`.text();
             log = extractFailedStepLog(rawLog, failedStep.name);
           } catch {}
         }
@@ -367,7 +581,7 @@ export async function getCiFailures(repoPath: string, branch?: string): Promise<
           detailsUrl: job.html_url || job.runUrl || "",
           log,
         };
-      })
+      }),
     );
 
     return results;
@@ -381,7 +595,8 @@ export async function getCiFailures(repoPath: string, branch?: string): Promise<
  */
 export async function getMainBranch(repoPath: string): Promise<string> {
   try {
-    const ref = await $`git -C ${repoPath} symbolic-ref refs/remotes/origin/HEAD`.text();
+    const ref =
+      await $`git -C ${repoPath} symbolic-ref refs/remotes/origin/HEAD`.text();
     // refs/remotes/origin/main → main
     return ref.trim().replace("refs/remotes/origin/", "");
   } catch {
@@ -392,10 +607,15 @@ export async function getMainBranch(repoPath: string): Promise<string> {
 /**
  * Get commit log messages between main and HEAD.
  */
-export async function getCommitLog(repoPath: string, mainBranch?: string): Promise<string> {
+export async function getCommitLog(
+  repoPath: string,
+  mainBranch?: string,
+): Promise<string> {
   const main = mainBranch || (await getMainBranch(repoPath));
   try {
-    return (await $`git -C ${repoPath} log origin/${main}..HEAD --pretty=format:%s%n%b`.text()).trim();
+    return (
+      await $`git -C ${repoPath} log origin/${main}..HEAD --pretty=format:%s%n%b`.text()
+    ).trim();
   } catch {
     return "";
   }
@@ -404,10 +624,15 @@ export async function getCommitLog(repoPath: string, mainBranch?: string): Promi
 /**
  * Get diff stat between main and HEAD.
  */
-export async function getDiffStat(repoPath: string, mainBranch?: string): Promise<string> {
+export async function getDiffStat(
+  repoPath: string,
+  mainBranch?: string,
+): Promise<string> {
   const main = mainBranch || (await getMainBranch(repoPath));
   try {
-    return (await $`git -C ${repoPath} diff --stat origin/${main}..HEAD`.text()).trim();
+    return (
+      await $`git -C ${repoPath} diff --stat origin/${main}..HEAD`.text()
+    ).trim();
   } catch {
     return "";
   }
@@ -416,7 +641,10 @@ export async function getDiffStat(repoPath: string, mainBranch?: string): Promis
 /**
  * Stage all changes and commit with the given message.
  */
-export async function stageAndCommit(repoPath: string, message: string): Promise<void> {
+export async function stageAndCommit(
+  repoPath: string,
+  message: string,
+): Promise<void> {
   await $`git -C ${repoPath} add .`;
   await $`git -C ${repoPath} commit -m ${message}`;
 }
@@ -424,7 +652,10 @@ export async function stageAndCommit(repoPath: string, message: string): Promise
 /**
  * Push the current branch to origin, setting upstream.
  */
-export async function pushBranch(repoPath: string, branchName: string): Promise<void> {
+export async function pushBranch(
+  repoPath: string,
+  branchName: string,
+): Promise<void> {
   await $`git -C ${repoPath} push -u origin ${branchName}`;
 }
 
@@ -437,13 +668,25 @@ export async function createPullRequest(
   body: string,
   reviewers: string[],
 ): Promise<{ number: number; url: string }> {
-  const remoteUrl = (await $`git -C ${repoPath} remote get-url origin`.text()).trim();
+  const remoteUrl = (
+    await $`git -C ${repoPath} remote get-url origin`.text()
+  ).trim();
   // Build reviewer args: ["--reviewer", "user1", "--reviewer", "user2"]
   const reviewerArgs: string[] = [];
   for (const r of reviewers) {
     reviewerArgs.push("--reviewer", r);
   }
-  const allArgs = ["pr", "create", "--title", title, "--body", body, "--repo", remoteUrl, ...reviewerArgs];
+  const allArgs = [
+    "pr",
+    "create",
+    "--title",
+    title,
+    "--body",
+    body,
+    "--repo",
+    remoteUrl,
+    ...reviewerArgs,
+  ];
   const result = await $`gh ${allArgs}`.cwd(repoPath).text();
   // gh pr create outputs the PR URL on the last line
   const url = result.trim().split("\n").pop()!.trim();
@@ -452,7 +695,8 @@ export async function createPullRequest(
 }
 
 export function formatPrStatus(pr: PrStatus): string {
-  const state = pr.state === "open" ? "OPEN" : pr.state === "merged" ? "MERGED" : "CLOSED";
+  const state =
+    pr.state === "open" ? "OPEN" : pr.state === "merged" ? "MERGED" : "CLOSED";
   const parts = [`PR #${pr.number} ${state}`];
   const total = pr.ciPassed + pr.ciFailed + pr.ciPending;
   if (total > 0) {
