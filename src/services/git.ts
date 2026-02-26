@@ -133,6 +133,7 @@ async function getOpenPrStatusesForRepo(
         nodes {
           number
           state
+          mergeable
           headRefName
           statusCheckRollup {
             contexts(first: 100) {
@@ -183,6 +184,7 @@ async function getOpenPrStatusesForRepo(
         byBranch.set(headRefName, {
           number: pr.number,
           state: normalizePrState(pr?.state),
+          hasConflicts: isConflicting(pr?.mergeable),
           unresolvedThreads,
           ciPassed,
           ciFailed,
@@ -277,6 +279,10 @@ function normalizePrState(state: string): "open" | "closed" | "merged" {
   if (state === "MERGED") return "merged";
   if (state === "CLOSED") return "closed";
   return "open";
+}
+
+function isConflicting(mergeable: string): boolean {
+  return String(mergeable || "").toUpperCase() === "CONFLICTING";
 }
 
 export async function getCurrentBranch(repoPath: string): Promise<string> {
@@ -785,6 +791,9 @@ export function formatPrStatus(pr: PrStatus): string {
   const state =
     pr.state === "open" ? "OPEN" : pr.state === "merged" ? "MERGED" : "CLOSED";
   const parts = [`PR #${pr.number} ${state}`];
+  if (pr.hasConflicts) {
+    parts.push("CONFLICTS");
+  }
   const total = pr.ciPassed + pr.ciFailed + pr.ciPending;
   if (total > 0) {
     if (pr.ciFailed > 0) {

@@ -6,8 +6,17 @@ import { NotesPane } from "../components/NotesPane.js";
 import { TerminalPane } from "../components/TerminalPane.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { processChord } from "../utils/keyboard.js";
-import { formatGitStatus, formatPrStatus, getGitStatus, getGitStatusWithPr } from "../services/git.js";
-import { closeTask as dbCloseTask, updateTask, getTasksForProject } from "../services/db.js";
+import {
+  formatGitStatus,
+  formatPrStatus,
+  getGitStatus,
+  getGitStatusWithPr,
+} from "../services/git.js";
+import {
+  closeTask as dbCloseTask,
+  updateTask,
+  getTasksForProject,
+} from "../services/db.js";
 import { deleteWorktree } from "../services/worktree.js";
 import { destroySession } from "../services/terminalManager.js";
 import { StatusDots } from "../components/StatusDots.js";
@@ -64,7 +73,11 @@ export function TaskView() {
     };
     updateTask(activeTask.id, updates);
     setActiveTask({ ...activeTask, ...updates });
-    setTasks(useStore.getState().tasks.map((t) => t.id === activeTask.id ? { ...t, ...updates } : t));
+    setTasks(
+      useStore
+        .getState()
+        .tasks.map((t) => (t.id === activeTask.id ? { ...t, ...updates } : t)),
+    );
     setChordBuffer("");
     setFocusPane("console");
     markConsoleInteracted(activeTask.id);
@@ -83,35 +96,35 @@ export function TaskView() {
 
   const pollGit = () => {
     if (!activeTask?.worktree_path) return Promise.resolve();
-    return getGitStatus(activeTask.worktree_path).then(
-      (status) => {
-        // Merge git fields atomically, preserving whatever PR data exists
-        useStore.setState((state) => ({
-          gitStatuses: {
-            ...state.gitStatuses,
-            [activeTask.id]: {
-              ...status,
-              pr: state.gitStatuses[activeTask.id]?.pr ?? null,
-            },
+    return getGitStatus(activeTask.worktree_path).then((status) => {
+      // Merge git fields atomically, preserving whatever PR data exists
+      useStore.setState((state) => ({
+        gitStatuses: {
+          ...state.gitStatuses,
+          [activeTask.id]: {
+            ...status,
+            pr: state.gitStatuses[activeTask.id]?.pr ?? null,
           },
-        }));
-      }
-    );
+        },
+      }));
+    });
   };
   const pollPr = () => {
     if (!activeTask?.worktree_path) return Promise.resolve();
     if (prInFlightRef.current) return Promise.resolve();
     prInFlightRef.current = true;
-    return getGitStatusWithPr(activeTask.worktree_path).then(
-      (status) => {
+    return getGitStatusWithPr(activeTask.worktree_path)
+      .then((status) => {
         setGitStatus(activeTask.id, status);
         // Stop polling once checks are settled (nothing pending)
         if (status.pr && status.pr.ciPending === 0 && prIntervalRef.current) {
           clearInterval(prIntervalRef.current);
           prIntervalRef.current = null;
         }
-      }
-    ).finally(() => { prInFlightRef.current = false; });
+      })
+      .finally(() => {
+        prInFlightRef.current = false;
+      });
   };
 
   const startPolling = () => {
@@ -135,8 +148,14 @@ export function TaskView() {
   // Pause/resume polling when copy mode toggles
   useEffect(() => {
     if (copyMode) {
-      if (gitIntervalRef.current) { clearInterval(gitIntervalRef.current); gitIntervalRef.current = null; }
-      if (prIntervalRef.current) { clearInterval(prIntervalRef.current); prIntervalRef.current = null; }
+      if (gitIntervalRef.current) {
+        clearInterval(gitIntervalRef.current);
+        gitIntervalRef.current = null;
+      }
+      if (prIntervalRef.current) {
+        clearInterval(prIntervalRef.current);
+        prIntervalRef.current = null;
+      }
     } else if (activeTask?.worktree_path) {
       startPolling();
     }
@@ -240,7 +259,14 @@ export function TaskView() {
     // Squash merge PR
     if (input === "s" && !key.super && activeTask?.worktree_path) {
       const pr = gitStatuses[activeTask.id]?.pr;
-      if (pr && pr.state === "open" && pr.ciFailed === 0 && pr.ciPending === 0 && pr.unresolvedThreads === 0) {
+      if (
+        pr &&
+        pr.state === "open" &&
+        !pr.hasConflicts &&
+        pr.ciFailed === 0 &&
+        pr.ciPending === 0 &&
+        pr.unresolvedThreads === 0
+      ) {
         setModal({
           type: "confirm",
           message: `Squash and merge PR #${pr.number}?`,
@@ -301,7 +327,9 @@ export function TaskView() {
     setModal(null);
     setFetching(true);
     try {
-      const remoteUrl = (await $`git -C ${activeTask.worktree_path} remote get-url origin`.text()).trim();
+      const remoteUrl = (
+        await $`git -C ${activeTask.worktree_path} remote get-url origin`.text()
+      ).trim();
       await $`gh pr merge ${prNumber} --squash --repo ${remoteUrl}`;
       // Refresh PR status to show merged
       await pollPr();
@@ -314,8 +342,11 @@ export function TaskView() {
     const pr = gitStatuses[activeTask.id]?.pr;
     if (!pr || pr.state !== "open") return;
     try {
-      const remoteUrl = (await $`git -C ${activeTask.worktree_path} remote get-url origin`.text()).trim();
-      const prJson = await $`gh pr view ${pr.number} --repo ${remoteUrl} --json url`.text();
+      const remoteUrl = (
+        await $`git -C ${activeTask.worktree_path} remote get-url origin`.text()
+      ).trim();
+      const prJson =
+        await $`gh pr view ${pr.number} --repo ${remoteUrl} --json url`.text();
       const { url } = JSON.parse(prJson) as { url?: string };
       if (url) {
         Bun.spawn(["open", url], { stdio: ["ignore", "ignore", "ignore"] });
@@ -326,9 +357,13 @@ export function TaskView() {
   const handleOpenTower = async () => {
     if (!activeTask?.worktree_path) return;
     try {
-      const repoRoot = (await $`git -C ${activeTask.worktree_path} rev-parse --show-toplevel`.text()).trim();
+      const repoRoot = (
+        await $`git -C ${activeTask.worktree_path} rev-parse --show-toplevel`.text()
+      ).trim();
       if (repoRoot) {
-        Bun.spawn(["gittower", repoRoot], { stdio: ["ignore", "ignore", "ignore"] });
+        Bun.spawn(["gittower", repoRoot], {
+          stdio: ["ignore", "ignore", "ignore"],
+        });
       }
     } catch {}
   };
@@ -347,7 +382,11 @@ export function TaskView() {
     if (!activeTask || !activeProject) return;
     // Mark as closing immediately and navigate away
     const closingTask = { ...activeTask, status: "closing" as const };
-    setTasks(useStore.getState().tasks.map((t) => t.id === activeTask.id ? closingTask : t));
+    setTasks(
+      useStore
+        .getState()
+        .tasks.map((t) => (t.id === activeTask.id ? closingTask : t)),
+    );
     setActiveTask(null);
     setModal(null);
     setView("tasks");
@@ -357,7 +396,11 @@ export function TaskView() {
       destroySession(`${activeTask.id}-terminal`);
       destroySession(`${activeTask.id}-console`);
       if (activeTask.worktree_path) {
-        await deleteWorktree(activeProject.path, activeTask.worktree_path, activeTask.branch_name);
+        await deleteWorktree(
+          activeProject.path,
+          activeTask.worktree_path,
+          activeTask.branch_name,
+        );
       }
       dbCloseTask(activeTask.id);
       useStore.getState().setTasks(getTasksForProject(activeProject.id));
@@ -386,23 +429,32 @@ export function TaskView() {
             {activeTask.label}
           </Text>
           {copyMode && (
-            <Text bold color="yellow"> COPY MODE</Text>
+            <Text bold color="yellow">
+              {" "}
+              COPY MODE
+            </Text>
           )}
           {fetching ? (
             <Text dimColor> Fetching...</Text>
           ) : (
             <>
-              {gitStatus && (
-                <Text dimColor> {formatGitStatus(gitStatus)}</Text>
-              )}
+              {gitStatus && <Text dimColor> {formatGitStatus(gitStatus)}</Text>}
               {gitStatus?.pr && (
-                <Text color={
-                  gitStatus.pr.ciFailed > 0 || gitStatus.pr.unresolvedThreads > 0 ? "red"
-                    : gitStatus.pr.ciPending > 0 ? "yellow"
-                    : gitStatus.pr.state === "merged" ? "magenta"
-                    : "green"
-                }>
-                  {" "}{formatPrStatus(gitStatus.pr)}
+                <Text
+                  color={
+                    gitStatus.pr.hasConflicts ||
+                    gitStatus.pr.ciFailed > 0 ||
+                    gitStatus.pr.unresolvedThreads > 0
+                      ? "red"
+                      : gitStatus.pr.ciPending > 0
+                        ? "yellow"
+                        : gitStatus.pr.state === "merged"
+                          ? "magenta"
+                          : "green"
+                  }
+                >
+                  {" "}
+                  {formatPrStatus(gitStatus.pr)}
                 </Text>
               )}
             </>
@@ -412,11 +464,11 @@ export function TaskView() {
           <StatusDots {...allDots} />
           {!activeTask.model ? (
             <Text dimColor color="yellow">
-              cl: Claude  co: Codex
+              cl: Claude co: Codex
             </Text>
           ) : (
             <Text dimColor color="yellow">
-              l: Claude  o: Codex
+              l: Claude o: Codex
             </Text>
           )}
         </Box>
@@ -426,10 +478,20 @@ export function TaskView() {
       <NotesPane />
 
       {/* Terminal Pane (15%) */}
-      <TerminalPane type="terminal" label="Terminal" focusKey="t" paused={copyMode} />
+      <TerminalPane
+        type="terminal"
+        label="Terminal"
+        focusKey="t"
+        paused={copyMode}
+      />
 
       {/* Console Pane (65%) */}
-      <TerminalPane type="console" label="Console" focusKey="c" paused={copyMode} />
+      <TerminalPane
+        type="console"
+        label="Console"
+        focusKey="c"
+        paused={copyMode}
+      />
 
       {/* Confirm Modal */}
       {modal?.type === "confirm" && (
@@ -439,7 +501,6 @@ export function TaskView() {
           onCancel={() => setModal(null)}
         />
       )}
-
     </Box>
   );
 }

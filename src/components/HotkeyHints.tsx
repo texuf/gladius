@@ -72,10 +72,15 @@ export function HotkeyHints() {
         : ["cl Claude", "co Codex"];
       const pr = activeTask && gitStatuses[activeTask.id]?.pr;
       const hasIssues =
-        pr && (pr.unresolvedThreads > 0 || pr.ciFailed > 0 || pr.ciPending > 0);
+        pr &&
+        (pr.hasConflicts ||
+          pr.unresolvedThreads > 0 ||
+          pr.ciFailed > 0 ||
+          pr.ciPending > 0);
       const isGreen =
         pr &&
         pr.state === "open" &&
+        !pr.hasConflicts &&
         pr.ciFailed === 0 &&
         pr.ciPending === 0 &&
         pr.unresolvedThreads === 0;

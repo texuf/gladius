@@ -11,7 +11,8 @@ const TMUX_SOCKET = "gladius";
  */
 async function captureTmuxPane(sessionName: string): Promise<string | null> {
   try {
-    const content = await $`tmux -L ${TMUX_SOCKET} capture-pane -t ${sessionName} -p`.text();
+    const content =
+      await $`tmux -L ${TMUX_SOCKET} capture-pane -t ${sessionName} -p`.text();
     return content;
   } catch {
     return null;
@@ -50,7 +51,7 @@ export async function computeTaskStatus(
   branchName: string | null,
   model: string | null,
   consoleInteracted: boolean,
-  consoleFocused: boolean
+  consoleFocused: boolean,
 ): Promise<TaskStatusColor> {
   // Console currently focused → always yellow
   if (consoleFocused) return "yellow";
@@ -75,9 +76,20 @@ export async function computeTaskStatus(
     try {
       const gitStatus = await getGitStatusWithPr(worktreePath);
       if (gitStatus.pr) {
-        if (gitStatus.pr.unresolvedThreads > 0 || gitStatus.pr.ciFailed > 0) return "red";
+        if (
+          gitStatus.pr.hasConflicts ||
+          gitStatus.pr.unresolvedThreads > 0 ||
+          gitStatus.pr.ciFailed > 0
+        )
+          return "red";
         if (gitStatus.pr.ciPending > 0) return "yellow";
-        if (gitStatus.pr.state === "open" && gitStatus.pr.ciFailed === 0 && gitStatus.pr.unresolvedThreads === 0) return "green";
+        if (
+          gitStatus.pr.state === "open" &&
+          !gitStatus.pr.hasConflicts &&
+          gitStatus.pr.ciFailed === 0 &&
+          gitStatus.pr.unresolvedThreads === 0
+        )
+          return "green";
       }
     } catch {}
   }
@@ -90,11 +102,14 @@ export async function computeTaskStatus(
 /**
  * Compute statuses for all active tasks.
  */
-export async function computeAllTaskStatuses(): Promise<Record<string, TaskStatusColor>> {
+export async function computeAllTaskStatuses(): Promise<
+  Record<string, TaskStatusColor>
+> {
   const tasks = getAllActiveTasks();
   const state = useStore.getState();
   const interacted = state.consoleInteractedTasks;
-  const focusedTaskId = state.focusPane === "console" ? state.activeTask?.id : null;
+  const focusedTaskId =
+    state.focusPane === "console" ? state.activeTask?.id : null;
   const results: Record<string, TaskStatusColor> = {};
 
   await Promise.all(
@@ -105,9 +120,9 @@ export async function computeAllTaskStatuses(): Promise<Record<string, TaskStatu
         task.branch_name,
         task.model,
         interacted.has(task.id),
-        task.id === focusedTaskId
+        task.id === focusedTaskId,
       );
-    })
+    }),
   );
 
   return results;
