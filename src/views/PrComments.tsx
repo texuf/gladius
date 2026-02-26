@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { useStore } from "../store/index.js";
 import {
@@ -11,6 +11,9 @@ import { writeToSession } from "../services/terminalManager.js";
 import type { ReviewThread, CiCheckFailure } from "../store/types.js";
 
 const MAX_DETAIL_LOG_LINES = 40;
+type IssueItem =
+  | { kind: "ci"; key: string; value: CiCheckFailure }
+  | { kind: "thread"; key: string; value: ReviewThread };
 
 function truncateDetailLog(
   log: string,
@@ -23,7 +26,7 @@ function truncateDetailLog(
   let text = truncated ? lines.slice(0, maxLines).join("\n") : log;
 
   if (truncated) {
-    text = `${text}\n\n[Output truncated in UI. Press p to paste full output.]`;
+    text = `${text}\n\n[Output truncated in UI. Select with Space, then press p to paste full output.]`;
   }
 
   return { text, truncated };
@@ -68,47 +71,90 @@ export function PrComments() {
   const setPrCommentsSelectionKind = useStore(
     (s) => s.setPrCommentsSelectionKind,
   );
+  const setPrCommentsHasSelection = useStore(
+    (s) => s.setPrCommentsHasSelection,
+  );
 
   const [threads, setThreads] = useState<ReviewThread[]>([]);
   const [ciFailures, setCiFailures] = useState<CiCheckFailure[]>([]);
   const [selected, setSelected] = useState(0);
+  const [selectedIssueKeys, setSelectedIssueKeys] = useState<Set<string>>(
+    new Set(),
+  );
   const [loadingComments, setLoadingComments] = useState(true);
   const [loadingCi, setLoadingCi] = useState(true);
 
   const loading = loadingComments || loadingCi;
-  const totalItems = ciFailures.length + threads.length;
-  const isCiSelected = selected < ciFailures.length;
-  const selectedCi = isCiSelected ? ciFailures[selected] : null;
+  const issueItems: IssueItem[] = useMemo(
+    () => [
+      ...ciFailures.map((failure, i) => ({
+        kind: "ci" as const,
+        key: `ci-${i}`,
+        value: failure,
+      })),
+      ...threads.map((thread) => ({
+        kind: "thread" as const,
+        key: `thread-${thread.id}`,
+        value: thread,
+      })),
+    ],
+    [ciFailures, threads],
+  );
+  const totalItems = issueItems.length;
+  const selectedItem =
+    selected >= 0 && selected < totalItems ? issueItems[selected] : null;
+  const selectedItemKind = selectedItem?.kind ?? "none";
+  const selectedCi = selectedItem?.kind === "ci" ? selectedItem.value : null;
   const selectedCiDisplay = selectedCi
     ? truncateDetailLog(selectedCi.log)
     : null;
-  const selectedThread = !isCiSelected
-    ? threads[selected - ciFailures.length]
-    : null;
+  const selectedThread =
+    selectedItem?.kind === "thread" ? selectedItem.value : null;
 
   useEffect(() => {
-    if (totalItems === 0) {
-      setPrCommentsSelectionKind("none");
-      return;
-    }
-    if (selected < ciFailures.length) {
-      setPrCommentsSelectionKind("ci");
-      return;
-    }
-    if (selected < totalItems) {
-      setPrCommentsSelectionKind("thread");
-      return;
-    }
-    setPrCommentsSelectionKind("none");
-  }, [selected, ciFailures.length, totalItems, setPrCommentsSelectionKind]);
+    setSelected((prev) => {
+      if (totalItems === 0) return 0;
+      return Math.min(prev, totalItems - 1);
+    });
+  }, [totalItems]);
+
+  useEffect(() => {
+    const currentKeys = new Set(issueItems.map((item) => item.key));
+    setSelectedIssueKeys((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const key of prev) {
+        if (currentKeys.has(key)) {
+          next.add(key);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [issueItems]);
+
+  useEffect(() => {
+    setPrCommentsSelectionKind(selectedItemKind);
+  }, [selectedItemKind, setPrCommentsSelectionKind]);
+
+  useEffect(() => {
+    setPrCommentsHasSelection(selectedIssueKeys.size > 0);
+  }, [selectedIssueKeys, setPrCommentsHasSelection]);
 
   useEffect(() => {
     return () => {
       setPrCommentsSelectionKind("none");
+      setPrCommentsHasSelection(false);
     };
-  }, [setPrCommentsSelectionKind]);
+  }, [setPrCommentsSelectionKind, setPrCommentsHasSelection]);
 
   useEffect(() => {
+    setSelected(0);
+    setSelectedIssueKeys(new Set());
+    setLoadingComments(true);
+    setLoadingCi(true);
+
     if (!activeTask?.worktree_path) {
       setLoadingComments(false);
       setLoadingCi(false);
@@ -216,40 +262,63 @@ export function PrComments() {
       return;
     }
 
-    if (input === "P" && activeTask && totalItems > 0) {
+    if (input === " " && selectedItem) {
+      setSelectedIssueKeys((prev) => {
+        const next = new Set(prev);
+        if (next.has(selectedItem.key)) {
+          next.delete(selectedItem.key);
+        } else {
+          next.add(selectedItem.key);
+        }
+        return next;
+      });
+      return;
+    }
+
+    if (input === "p" && activeTask && selectedIssueKeys.size > 0) {
       const parts: string[] = [];
-      if (ciFailures.length > 0) {
+      const selectedItems = issueItems.filter((item) =>
+        selectedIssueKeys.has(item.key),
+      );
+      const selectedCiFailures = selectedItems.filter(
+        (item): item is Extract<IssueItem, { kind: "ci" }> =>
+          item.kind === "ci",
+      );
+      const selectedThreads = selectedItems.filter(
+        (item): item is Extract<IssueItem, { kind: "thread" }> =>
+          item.kind === "thread",
+      );
+
+      if (selectedCiFailures.length > 0) {
         parts.push("Please fix these CI failures:\n");
-        for (const f of ciFailures) {
-          parts.push(formatCiFailureForPaste(f));
+        for (const item of selectedCiFailures) {
+          parts.push(formatCiFailureForPaste(item.value));
         }
       }
-      if (threads.length > 0) {
+      if (selectedThreads.length > 0) {
         parts.push("Please fix these PR review comments:\n");
-        for (const t of threads) {
-          parts.push(formatThreadForPaste(t));
+        for (const item of selectedThreads) {
+          parts.push(formatThreadForPaste(item.value));
         }
       }
       returnToConsoleWithPrompt(parts.join("\n---\n\n"));
       return;
     }
 
-    if (input === "p" && activeTask) {
-      if (selectedCi) {
-        returnToConsoleWithPrompt(formatCiFailureForPaste(selectedCi));
-      } else if (selectedThread) {
-        returnToConsoleWithPrompt(formatThreadForPaste(selectedThread));
-      }
-      return;
-    }
-
     if (input === "s") {
       // Only works on review threads, not CI failures
-      if (isCiSelected || !selectedThread) return;
-      const threadIndex = selected - ciFailures.length;
+      if (!selectedThread || !selectedItem || selectedItem.kind !== "thread")
+        return;
+      const selectedThreadId = selectedThread.id;
       resolveThread(selectedThread.id).then(() => refreshPr());
-      const next = threads.filter((_, i) => i !== threadIndex);
+      const next = threads.filter((thread) => thread.id !== selectedThreadId);
       setThreads(next);
+      setSelectedIssueKeys((prev) => {
+        if (!prev.has(selectedItem.key)) return prev;
+        const updated = new Set(prev);
+        updated.delete(selectedItem.key);
+        return updated;
+      });
       const newTotal = ciFailures.length + next.length;
       if (selected >= newTotal) setSelected(Math.max(0, newTotal - 1));
       return;
@@ -297,6 +366,8 @@ export function PrComments() {
               {loadingCi && <Text dimColor> Loading CI failures...</Text>}
               {ciFailures.map((f, i) => {
                 const isSelected = i === selected;
+                const issueKey = `ci-${i}`;
+                const isMarked = selectedIssueKeys.has(issueKey);
                 return (
                   <Box key={`ci-${i}`} flexDirection="column">
                     <Text
@@ -305,11 +376,12 @@ export function PrComments() {
                       wrap="truncate"
                     >
                       {isSelected ? " \u25B8 " : "   "}
+                      {isMarked ? "[x] " : "[ ] "}
                       <Text color="red">CI: </Text>
                       {f.name}
                     </Text>
                     <Text dimColor wrap="truncate">
-                      {"     "}
+                      {"         "}
                       {f.failedStep ? `Step: ${f.failedStep}` : "Failed"}
                     </Text>
                   </Box>
@@ -327,6 +399,8 @@ export function PrComments() {
               )}
               {threads.map((t, i) => {
                 const globalIndex = ciFailures.length + i;
+                const issueKey = `thread-${t.id}`;
+                const isMarked = selectedIssueKeys.has(issueKey);
                 const previewComment =
                   [...t.comments]
                     .reverse()
@@ -348,10 +422,11 @@ export function PrComments() {
                       wrap="truncate"
                     >
                       {isSelected ? " \u25B8 " : "   "}
+                      {isMarked ? "[x] " : "[ ] "}
                       {t.path}:{t.line}
                     </Text>
                     <Text dimColor wrap="truncate">
-                      {"     "}@{previewComment?.author ?? "unknown"}:{" "}
+                      {"         "}@{previewComment?.author ?? "unknown"}:{" "}
                       {firstLine}
                       {firstLine.length >= 40 ? "..." : ""}
                     </Text>

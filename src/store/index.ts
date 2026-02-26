@@ -15,6 +15,7 @@ export const useStore = create<AppState>((set) => ({
   // Task View
   focusPane: "none",
   prCommentsSelectionKind: "none",
+  prCommentsHasSelection: false,
   chordBuffer: "",
   copyMode: false,
 
@@ -46,6 +47,8 @@ export const useStore = create<AppState>((set) => ({
   setFocusPane: (focusPane) => set({ focusPane }),
   setPrCommentsSelectionKind: (prCommentsSelectionKind) =>
     set({ prCommentsSelectionKind }),
+  setPrCommentsHasSelection: (prCommentsHasSelection) =>
+    set({ prCommentsHasSelection }),
   setChordBuffer: (chordBuffer) => set({ chordBuffer }),
   setCopyMode: (copyMode) => set({ copyMode }),
   setAddingProject: (addingProject) => set({ addingProject }),

@@ -26,6 +26,7 @@ export function HotkeyHints() {
   const gitStatuses = useStore((s) => s.gitStatuses);
   const copyMode = useStore((s) => s.copyMode);
   const prCommentsSelectionKind = useStore((s) => s.prCommentsSelectionKind);
+  const prCommentsHasSelection = useStore((s) => s.prCommentsHasSelection);
 
   const [pty, setPty] = useState({ used: 0, max: 0 });
 
@@ -113,7 +114,10 @@ export function HotkeyHints() {
   } else if (view === "createPr") {
     hints.push("Esc Cancel");
   } else if (view === "prComments") {
-    hints.push("↑↓ Navigate", "p Paste", "P Paste All");
+    hints.push("↑↓ Navigate", "Space Select/Deselect");
+    if (prCommentsHasSelection) {
+      hints.push("p Paste Selected");
+    }
     if (prCommentsSelectionKind === "thread") {
       hints.push("s Resolve");
     }
