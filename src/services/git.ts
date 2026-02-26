@@ -428,11 +428,16 @@ export async function resolveThread(threadId: string): Promise<boolean> {
 
 /**
  * Extract the log output for a failed step from raw job logs.
- * Strategy: find the ##[error] line for this step, then grab the preceding
- * lines of output (the tail). This works well for large steps (like turbo build)
- * where the error is at the end after hundreds of lines of sub-task output.
+ * Strategy:
+ * 1) Scope to the failed step window using step timestamps (fallback to marker matching).
+ * 2) Anchor on the first substantive error signal inside that window.
+ * 3) Return a focused slice around the anchor.
  */
-function extractFailedStepLog(rawLog: string, stepName: string): string {
+function extractFailedStepLog(
+  rawLog: string,
+  stepName: string,
+  failedStep?: { started_at?: string; completed_at?: string },
+): string {
   const sanitizeLogLine = (line: string): string => {
     return (
       line
@@ -445,73 +450,155 @@ function extractFailedStepLog(rawLog: string, stepName: string): string {
     );
   };
 
+  const stripTimestamp = (line: string) =>
+    line.replace(/^\s*\d{4}-\d{2}-\d{2}T[\d:.]+Z\s?/, "");
+
+  const parseLineTimestamp = (line: string): number | null => {
+    const match = sanitizeLogLine(line).match(
+      /^\s*(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s?/,
+    );
+    if (!match) return null;
+    const parsed = Date.parse(match[1]);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const genericErrorPatterns = [
+    /process completed with exit code/i,
+    /error: script ".*" exited with code/i,
+    /\[error\] command finished with error/i,
+    /run failed: command\s+exited/i,
+    /error: "turbo" exited with code/i,
+    /command .* exited \(\d+\)/i,
+  ];
+  const strongErrorPatterns = [
+    /assertionerror/i,
+    /\bpanic:/i,
+    /\bfail\b/i,
+    /❯/,
+    /×/,
+    /expected .* to be/i,
+    /error:\s+unexpected http response/i,
+  ];
+
+  const isGenericErrorLine = (line: string): boolean =>
+    genericErrorPatterns.some((pattern) => pattern.test(line));
+  const isStrongErrorLine = (line: string): boolean =>
+    strongErrorPatterns.some((pattern) => pattern.test(line));
+
   const lines = rawLog.split("\n");
-  const stepLower = stepName.toLowerCase();
 
-  // Find the step's ##[group] start and the ##[error] that ends it
+  // First try to scope by the failed step's timestamps. This is the most
+  // reliable way to isolate the right section when the log contains many
+  // nested "Run ..." groups.
   let stepStart = -1;
-  let errorLine = -1;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (stepStart === -1) {
-      if (
-        line.includes("##[group]") &&
-        line.toLowerCase().includes(stepLower)
-      ) {
+  let stepEnd = -1;
+  const startedAtMs = failedStep?.started_at
+    ? Date.parse(failedStep.started_at)
+    : NaN;
+  const completedAtMs = failedStep?.completed_at
+    ? Date.parse(failedStep.completed_at)
+    : NaN;
+  if (Number.isFinite(startedAtMs) && Number.isFinite(completedAtMs)) {
+    const startBoundary = startedAtMs - 1_000;
+    const endBoundary = completedAtMs + 1_000;
+    for (let i = 0; i < lines.length; i++) {
+      const timestamp = parseLineTimestamp(lines[i]);
+      if (timestamp === null) continue;
+      if (stepStart === -1 && timestamp >= startBoundary) {
         stepStart = i;
+      }
+      if (timestamp <= endBoundary) {
+        stepEnd = i + 1;
+      }
+    }
+  }
+
+  // Preserve existing step-name scoping behavior as fallback.
+  if (stepStart === -1 || stepEnd === -1 || stepEnd <= stepStart) {
+    stepStart = -1;
+    stepEnd = -1;
+    const stepLower = stepName.toLowerCase();
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (stepStart === -1) {
+        if (
+          line.includes("##[group]") &&
+          line.toLowerCase().includes(stepLower)
+        ) {
+          stepStart = i;
+        }
+        continue;
+      }
+      if (i > stepStart && line.includes("##[group]Run ")) {
+        stepEnd = i;
+        break;
+      }
+    }
+  }
+
+  if (stepStart === -1) stepStart = 0;
+  if (stepEnd === -1) stepEnd = lines.length;
+
+  let firstNonGenericError = -1;
+  let firstStrongError = -1;
+  let firstGenericError = -1;
+  let firstErrorLike = -1;
+
+  for (let i = stepStart; i < stepEnd; i++) {
+    const raw = stripTimestamp(sanitizeLogLine(lines[i]));
+    const lower = raw.toLowerCase();
+    if (!lower) continue;
+
+    const isErrorMarker =
+      lower.includes("##[error]") || lower.startsWith("error:");
+    const isGeneric = isGenericErrorLine(raw);
+    const isStrong = isStrongErrorLine(raw);
+
+    if (isStrong && firstStrongError === -1) {
+      firstStrongError = i;
+    }
+
+    if (isErrorMarker) {
+      if (!isGeneric && firstNonGenericError === -1) {
+        firstNonGenericError = i;
+      } else if (isGeneric && firstGenericError === -1) {
+        firstGenericError = i;
       }
       continue;
     }
-    // Find the last ##[error] within this step's range
-    // (before the next top-level step, identified by ##[group]Run or end of log)
-    if (line.includes("##[error]")) {
-      errorLine = i;
+
+    if (lower.includes("error:") && firstErrorLike === -1) {
+      firstErrorLike = i;
     }
-    // Stop at the next step's "Run" group (top-level step boundary)
-    if (i > stepStart && line.includes("##[group]Run ")) break;
   }
 
-  // Fallback: step name (e.g. "Run CI Integration Tests") doesn't match any
-  // ##[group] marker (which may use the actual command like "Run bun run test:ci").
-  // Instead, anchor on the last meaningful ##[error] line in the log.
-  if (stepStart === -1) {
-    const lastGenericError = "Process completed with exit code";
-    let lastMeaningfulError = -1;
-    let lastError = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes("##[error]")) {
-        lastError = i;
-        if (!lines[i].includes(lastGenericError)) {
-          lastMeaningfulError = i;
-        }
-      }
-    }
-    errorLine = lastMeaningfulError !== -1 ? lastMeaningfulError : lastError;
-    if (errorLine === -1) return "";
-    stepStart = 0;
-  }
+  const anchor =
+    firstNonGenericError !== -1
+      ? firstNonGenericError
+      : firstStrongError !== -1
+        ? firstStrongError
+        : firstErrorLike !== -1
+          ? firstErrorLike
+          : firstGenericError !== -1
+            ? firstGenericError
+            : Math.max(stepStart, stepEnd - 1);
 
-  // Determine the range to extract: up to 60 lines before the error, through lines after
-  const end =
-    errorLine !== -1 ? Math.min(errorLine + 20, lines.length) : lines.length;
-  const tailStart =
-    errorLine !== -1
-      ? Math.max(stepStart + 1, errorLine - 60)
-      : Math.max(stepStart + 1, end - 60);
+  const windowStart = Math.max(stepStart, anchor - 35);
+  const windowEnd = Math.min(stepEnd, anchor + 45);
 
   const result: string[] = [];
-  for (let i = tailStart; i < end; i++) {
+  for (let i = windowStart; i < windowEnd; i++) {
     const line = lines[i];
-    // Skip group/endgroup markers from sub-tasks
     if (line.includes("##[group]") || line.includes("##[endgroup]")) continue;
-    // Strip timestamp prefix
-    let stripped = line.replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s?/, "");
-    if (stripped.startsWith("##[error]")) {
-      stripped = stripped.replace("##[error]", "").trim();
-    }
-    result.push(sanitizeLogLine(stripped));
+    const sanitized = sanitizeLogLine(line);
+    let stripped = stripTimestamp(sanitized);
+    stripped = stripped.replace(/^##\[error\]\s*/, "").trimEnd();
+    result.push(stripped);
   }
+
+  while (result.length > 0 && result[0].trim().length === 0) result.shift();
+  while (result.length > 0 && result[result.length - 1].trim().length === 0)
+    result.pop();
 
   return result.join("\n").trimEnd();
 }
@@ -571,7 +658,7 @@ export async function getCiFailures(
           try {
             const rawLog =
               await $`gh api repos/${parsed.owner}/${parsed.repo}/actions/jobs/${job.id}/logs`.text();
-            log = extractFailedStepLog(rawLog, failedStep.name);
+            log = extractFailedStepLog(rawLog, failedStep.name, failedStep);
           } catch {}
         }
 
