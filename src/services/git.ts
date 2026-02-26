@@ -240,6 +240,16 @@ export async function resolveThread(threadId: string): Promise<boolean> {
  * where the error is at the end after hundreds of lines of sub-task output.
  */
 function extractFailedStepLog(rawLog: string, stepName: string): string {
+  const sanitizeLogLine = (line: string): string => {
+    return line
+      // ANSI CSI sequences
+      .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")
+      // ANSI OSC sequences
+      .replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g, "")
+      // Remaining control chars (except tab)
+      .replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, "");
+  };
+
   const lines = rawLog.split("\n");
   const stepLower = stepName.toLowerCase();
 
@@ -298,7 +308,7 @@ function extractFailedStepLog(rawLog: string, stepName: string): string {
     if (stripped.startsWith("##[error]")) {
       stripped = stripped.replace("##[error]", "").trim();
     }
-    result.push(stripped);
+    result.push(sanitizeLogLine(stripped));
   }
 
   return result.join("\n").trimEnd();
