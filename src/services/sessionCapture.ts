@@ -1,18 +1,51 @@
 import { homedir } from "os";
 import { join } from "path";
-import { readdirSync, existsSync } from "fs";
+import { readdirSync, existsSync, statSync } from "fs";
+
+/**
+ * Find the most recently modified .jsonl file in a directory.
+ * Returns the session ID (filename without extension) or null.
+ */
+function findMostRecentSession(dir: string): string | null {
+  try {
+    if (!existsSync(dir)) return null;
+    let newest: { name: string; mtime: number } | null = null;
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith(".jsonl")) continue;
+      const mtime = statSync(join(dir, f)).mtimeMs;
+      if (!newest || mtime > newest.mtime) {
+        newest = { name: f, mtime };
+      }
+    }
+    return newest ? newest.name.replace(/\.jsonl$/, "") : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Watch for a new Claude session ID by polling ~/.claude/projects/<encoded-path>/
  * for new .jsonl files that appear after we start watching.
+ * Also checks for existing sessions on first call (handles missed captures).
  */
 export function watchForClaudeSessionId(
   worktreePath: string,
-  callback: (sessionId: string) => void
+  callback: (sessionId: string) => void,
+  backfillExisting = false,
 ): () => void {
   // Claude encodes project paths by replacing / with -
   const encoded = worktreePath.replaceAll("/", "-");
   const claudeProjectDir = join(homedir(), ".claude", "projects", encoded);
+
+  // If backfilling, immediately return the most recent existing session
+  if (backfillExisting) {
+    const existing = findMostRecentSession(claudeProjectDir);
+    if (existing) {
+      // Use setTimeout to allow cleanup ref to be set before callback fires
+      setTimeout(() => callback(existing), 0);
+      return () => {};
+    }
+  }
 
   // Snapshot existing files
   const existingFiles = new Set<string>();

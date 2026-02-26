@@ -75,14 +75,10 @@ export function TerminalPane({ type, label, focusKey, paused = false }: Terminal
       )
     : undefined;
 
-  // Session ID capture for console pane
+  // Session ID capture for console pane — runs whenever session ID is missing
   useEffect(() => {
     if (type !== "console" || !canEmbed || !activeTask) return;
 
-    // Check if this is a new session that needs capture
-    const sessionKey = `${activeTask.id}-console`;
-    const session = getSession(sessionKey);
-    if (!session?.isNew) return;
     // Already have a provider-specific session_id, no need to capture
     if (
       (activeTask.model === "claude" && activeTask.claude_session_id) ||
@@ -103,8 +99,13 @@ export function TerminalPane({ type, label, focusKey, paused = false }: Terminal
       }
     };
 
+    // If session already exists but ID was never captured, backfill from disk
+    const sessionKey = `${activeTask.id}-console`;
+    const session = getSession(sessionKey);
+    const backfill = !!session && !session.isNew;
+
     if (activeTask.model === "claude") {
-      captureCleanupRef.current = watchForClaudeSessionId(activeTask.worktree_path!, onCapture);
+      captureCleanupRef.current = watchForClaudeSessionId(activeTask.worktree_path!, onCapture, backfill);
     } else if (activeTask.model === "codex") {
       captureCleanupRef.current = watchForCodexSessionId(onCapture);
     }
@@ -113,7 +114,7 @@ export function TerminalPane({ type, label, focusKey, paused = false }: Terminal
       captureCleanupRef.current?.();
       captureCleanupRef.current = null;
     };
-  }, [activeTask?.id, activeTask?.model, canEmbed]);
+  }, [activeTask?.id, activeTask?.model, activeTask?.claude_session_id, activeTask?.codex_session_id, canEmbed]);
 
   const placeholderText = type === "console"
     ? (activeTask?.model
