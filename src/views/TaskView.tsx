@@ -12,6 +12,7 @@ import {
   getGitStatus,
   getGitStatusWithPr,
 } from "../services/git.js";
+import { refreshAllTaskStatuses } from "../services/taskStatus.js";
 import {
   closeTask as dbCloseTask,
   updateTask,
@@ -228,9 +229,9 @@ export function TaskView() {
       setFetching(true);
       if (gitIntervalRef.current) clearInterval(gitIntervalRef.current);
       if (prIntervalRef.current) clearInterval(prIntervalRef.current);
-      // Use pollPr only — it fetches full git status + PR in one call,
-      // avoiding the race where pollGit overwrites fresh PR data
-      pollPr(true).then(() => {
+      // Force-refresh global task statuses and git/PR status cache so every
+      // view reads the same up-to-date source of truth immediately.
+      refreshAllTaskStatuses({ forcePrRefresh: true }).finally(() => {
         setFetching(false);
         gitIntervalRef.current = setInterval(pollGit, 5000);
         // Only restart PR polling if checks are still pending

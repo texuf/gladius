@@ -33,15 +33,18 @@ function hasTmux(): boolean {
 function ensureTmuxConf(): void {
   if (existsSync(TMUX_CONF)) return;
   if (!existsSync(GLADIUS_DIR)) mkdirSync(GLADIUS_DIR, { recursive: true });
-  writeFileSync(TMUX_CONF, [
-    "set -g prefix None",
-    "unbind C-b",
-    "set -g status off",
-    "set -g escape-time 0",
-    "set -g mouse off",
-    "set -g default-terminal 'xterm-256color'",
-    "",
-  ].join("\n"));
+  writeFileSync(
+    TMUX_CONF,
+    [
+      "set -g prefix None",
+      "unbind C-b",
+      "set -g status off",
+      "set -g escape-time 0",
+      "set -g mouse off",
+      "set -g default-terminal 'xterm-256color'",
+      "",
+    ].join("\n"),
+  );
 }
 
 function tmuxSessionName(taskId: string): string {
@@ -50,30 +53,55 @@ function tmuxSessionName(taskId: string): string {
 }
 
 function tmuxSessionExists(name: string): boolean {
-  const result = spawnSync("tmux", ["-L", TMUX_SOCKET, "has-session", "-t", name]);
+  const result = spawnSync("tmux", [
+    "-L",
+    TMUX_SOCKET,
+    "has-session",
+    "-t",
+    name,
+  ]);
   return result.status === 0;
 }
 
-function createTmuxSession(name: string, cwd: string, cols: number, rows: number, command: string[]): void {
+function createTmuxSession(
+  name: string,
+  cwd: string,
+  cols: number,
+  rows: number,
+  command: string[],
+): void {
   ensureTmuxConf();
   // Wrap command in a login shell so ~/.zshrc / ~/.zprofile are sourced
   // (ensures PATH includes user-installed tools like protoc, buf, bun, go, etc.)
   const shell = process.env.SHELL || "/bin/zsh";
-  const isLoginShell = command.length >= 2 && command[0] === shell && command[1] === "-l";
+  const isLoginShell =
+    command.length >= 2 && command[0] === shell && command[1] === "-l";
   const wrappedCommand = isLoginShell
     ? command
-    : [shell, "-lc", `exec ${command.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`];
+    : [
+        shell,
+        "-lc",
+        `exec ${command.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`,
+      ];
 
   // Create detached session with specified size
   const args = [
-    "-L", TMUX_SOCKET,
-    "-f", TMUX_CONF,
-    "new-session", "-d",
-    "-s", name,
-    "-c", cwd,
-    "-x", String(cols),
-    "-y", String(rows),
-    "--", ...wrappedCommand,
+    "-L",
+    TMUX_SOCKET,
+    "-f",
+    TMUX_CONF,
+    "new-session",
+    "-d",
+    "-s",
+    name,
+    "-c",
+    cwd,
+    "-x",
+    String(cols),
+    "-y",
+    String(rows),
+    "--",
+    ...wrappedCommand,
   ];
   const result = spawnSync("tmux", args, {
     env: { ...process.env, TMUX: "" } as Record<string, string>, // allow nested tmux
@@ -89,7 +117,17 @@ function killTmuxSession(name: string): void {
 }
 
 function resizeTmuxSession(name: string, cols: number, rows: number): void {
-  spawnSync("tmux", ["-L", TMUX_SOCKET, "resize-window", "-t", name, "-x", String(cols), "-y", String(rows)]);
+  spawnSync("tmux", [
+    "-L",
+    TMUX_SOCKET,
+    "resize-window",
+    "-t",
+    name,
+    "-x",
+    String(cols),
+    "-y",
+    String(rows),
+  ]);
 }
 
 // ── Public API ──
@@ -99,7 +137,7 @@ export function getOrCreateSession(
   cwd: string,
   cols: number,
   rows: number,
-  command?: string[]
+  command?: string[],
 ): TerminalSession {
   const existing = sessions.get(taskId);
   if (existing) {
@@ -121,19 +159,29 @@ export function getOrCreateSession(
     }
 
     // Attach to tmux session via PTY
-    const proc = Bun.spawn(["tmux", "-L", TMUX_SOCKET, "attach-session", "-t", sessionName], {
-      env: { ...process.env, TMUX: "" } as Record<string, string>,
-      terminal: {
-        cols,
-        rows,
-        name: "xterm-256color",
-        data(_terminal: any, data: any) {
-          xterm.write(new Uint8Array(data));
+    const proc = Bun.spawn(
+      ["tmux", "-L", TMUX_SOCKET, "attach-session", "-t", sessionName],
+      {
+        env: { ...process.env, TMUX: "" } as Record<string, string>,
+        terminal: {
+          cols,
+          rows,
+          name: "xterm-256color",
+          data(_terminal: any, data: any) {
+            xterm.write(new Uint8Array(data));
+          },
         },
       },
-    });
+    );
 
-    const session: TerminalSession = { proc, xterm, cols, rows, command: cmd, isNew: !alreadyExists };
+    const session: TerminalSession = {
+      proc,
+      xterm,
+      cols,
+      rows,
+      command: cmd,
+      isNew: !alreadyExists,
+    };
     sessions.set(taskId, session);
     return session;
   }
@@ -152,7 +200,14 @@ export function getOrCreateSession(
     },
   });
 
-  const session: TerminalSession = { proc, xterm, cols, rows, command: cmd, isNew: true };
+  const session: TerminalSession = {
+    proc,
+    xterm,
+    cols,
+    rows,
+    command: cmd,
+    isNew: true,
+  };
   sessions.set(taskId, session);
   return session;
 }
@@ -169,8 +224,12 @@ export function detachSession(taskId: string): void {
   const session = sessions.get(taskId);
   if (!session) return;
   sessions.delete(taskId);
-  try { session.proc.terminal!.close(); } catch {}
-  try { session.proc.kill(); } catch {}
+  try {
+    session.proc.terminal!.close();
+  } catch {}
+  try {
+    session.proc.kill();
+  } catch {}
   session.xterm.dispose();
 }
 
@@ -216,4 +275,29 @@ export function writeToSession(taskId: string, text: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Get the current shell cwd for a persistent session.
+ * For tmux-backed sessions, this returns pane_current_path.
+ */
+export function getSessionCwd(taskId: string): string | null {
+  if (!hasTmux()) return null;
+  const sessionName = tmuxSessionName(taskId);
+  const result = spawnSync(
+    "tmux",
+    [
+      "-L",
+      TMUX_SOCKET,
+      "display-message",
+      "-p",
+      "-t",
+      `${sessionName}:0.0`,
+      "#{pane_current_path}",
+    ],
+    { encoding: "utf-8" },
+  );
+  if (result.status !== 0) return null;
+  const path = result.stdout?.toString().trim();
+  return path || null;
 }

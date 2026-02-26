@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
 import { useStore } from "../store/index.js";
 import {
@@ -9,7 +9,7 @@ import {
   createTask as dbCreateTask,
   reopenTask as dbReopenTask,
 } from "../services/db.js";
-import { getGitStatus, formatGitStatus } from "../services/git.js";
+import { formatGitStatus } from "../services/git.js";
 import { generateLabel, deduplicateLabel } from "../utils/label.js";
 import { createWorktree } from "../services/worktree.js";
 import { deleteWorktree } from "../services/worktree.js";
@@ -17,7 +17,7 @@ import { BRANCH_PREFIX } from "../utils/constants.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { TextInputField } from "../components/TextInput.js";
 import { StatusDots } from "../components/StatusDots.js";
-import type { GitStatus, Task, TaskStatusColor } from "../store/types.js";
+import type { Task } from "../store/types.js";
 
 export function TaskList() {
   const activeProject = useStore((s) => s.activeProject);
@@ -30,29 +30,20 @@ export function TaskList() {
   const modal = useStore((s) => s.modal);
   const setModal = useStore((s) => s.setModal);
   const gitStatuses = useStore((s) => s.gitStatuses);
-  const setGitStatus = useStore((s) => s.setGitStatus);
   const taskStatuses = useStore((s) => s.taskStatuses);
 
   const [newTaskDesc, setNewTaskDesc] = useState("");
   const [creating, setCreating] = useState(false);
 
-  const activeTasks = tasks.filter((t) => t.status === "active" || t.status === "closing");
+  const activeTasks = tasks.filter(
+    (t) => t.status === "active" || t.status === "closing",
+  );
   const closedTasks = tasks
     .filter((t) => t.status === "closed")
-    .sort((a, b) => (b.last_accessed_at || "").localeCompare(a.last_accessed_at || ""));
+    .sort((a, b) =>
+      (b.last_accessed_at || "").localeCompare(a.last_accessed_at || ""),
+    );
   const allTasks = [...activeTasks, ...closedTasks];
-
-  // Load git statuses
-  useEffect(() => {
-    if (!activeProject) return;
-    for (const task of activeTasks) {
-      if (task.worktree_path) {
-        getGitStatus(task.worktree_path, task.branch_name || undefined).then(
-          (status) => setGitStatus(task.id, status)
-        );
-      }
-    }
-  }, [tasks]);
 
   useInput((input, key) => {
     if (modal || creating) return;
@@ -65,8 +56,15 @@ export function TaskList() {
       setSelectedIndex(Math.min(allTasks.length - 1, selectedIndex + 1));
     } else if (key.upArrow && key.shift) {
       // Reorder: swap with previous (active tasks only)
-      if (selectedIndex > 0 && selectedTask?.status === "active" && activeTasks[selectedIndex - 1]) {
-        swapTaskOrder(activeTasks[selectedIndex].id, activeTasks[selectedIndex - 1].id);
+      if (
+        selectedIndex > 0 &&
+        selectedTask?.status === "active" &&
+        activeTasks[selectedIndex - 1]
+      ) {
+        swapTaskOrder(
+          activeTasks[selectedIndex].id,
+          activeTasks[selectedIndex - 1].id,
+        );
         reloadTasks();
         setSelectedIndex(selectedIndex - 1);
       }
@@ -77,7 +75,10 @@ export function TaskList() {
         selectedTask?.status === "active" &&
         activeTasks[selectedIndex + 1]
       ) {
-        swapTaskOrder(activeTasks[selectedIndex].id, activeTasks[selectedIndex + 1].id);
+        swapTaskOrder(
+          activeTasks[selectedIndex].id,
+          activeTasks[selectedIndex + 1].id,
+        );
         reloadTasks();
         setSelectedIndex(selectedIndex + 1);
       }
@@ -86,7 +87,8 @@ export function TaskList() {
       touchTask(selectedTask.id);
       const refreshedTasks = getTasksForProject(activeProject.id);
       setTasks(refreshedTasks);
-      const refreshedTask = refreshedTasks.find((t) => t.id === selectedTask.id) ?? selectedTask;
+      const refreshedTask =
+        refreshedTasks.find((t) => t.id === selectedTask.id) ?? selectedTask;
       setActiveTask(refreshedTask);
       setView("taskView");
     } else if (key.return && selectedTask?.status === "closing") {
@@ -111,13 +113,21 @@ export function TaskList() {
 
   const handleCloseTask = (task: Task) => {
     // Mark as closing immediately
-    setTasks(tasks.map((t) => t.id === task.id ? { ...t, status: "closing" as const } : t));
+    setTasks(
+      tasks.map((t) =>
+        t.id === task.id ? { ...t, status: "closing" as const } : t,
+      ),
+    );
     setModal(null);
 
     // Run slow cleanup in background
     (async () => {
       if (task.worktree_path && activeProject) {
-        await deleteWorktree(activeProject.path, task.worktree_path, task.branch_name);
+        await deleteWorktree(
+          activeProject.path,
+          task.worktree_path,
+          task.branch_name,
+        );
       }
       dbCloseTask(task.id);
       reloadTasks();
@@ -131,7 +141,12 @@ export function TaskList() {
       const worktreePath = await createWorktree(activeProject.path, task.label);
       dbReopenTask(task.id, worktreePath);
       reloadTasks();
-      const reopened = { ...task, status: "active" as const, worktree_path: worktreePath, closed_at: null };
+      const reopened = {
+        ...task,
+        status: "active" as const,
+        worktree_path: worktreePath,
+        closed_at: null,
+      };
       setActiveTask(reopened);
       setView("taskView");
     } catch (e: any) {
@@ -157,7 +172,7 @@ export function TaskList() {
         label,
         description,
         branchName,
-        worktreePath
+        worktreePath,
       );
 
       reloadTasks();
@@ -211,7 +226,12 @@ export function TaskList() {
         const status = gitStatuses[task.id];
         const taskColor = taskStatuses[task.id];
         return (
-          <Box key={task.id} flexDirection="column" paddingLeft={1} marginBottom={1}>
+          <Box
+            key={task.id}
+            flexDirection="column"
+            paddingLeft={1}
+            marginBottom={1}
+          >
             <Box>
               {!isClosed && !isClosing && taskColor && taskColor !== "none" ? (
                 <StatusDots
@@ -235,9 +255,11 @@ export function TaskList() {
             </Box>
             <Box paddingLeft={4}>
               <Text dimColor>
-                &quot;{task.description.length > 50
+                &quot;
+                {task.description.length > 50
                   ? task.description.slice(0, 50) + "..."
-                  : task.description}&quot;
+                  : task.description}
+                &quot;
               </Text>
             </Box>
             {status && !isClosed && (

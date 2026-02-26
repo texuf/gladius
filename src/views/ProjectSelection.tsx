@@ -72,7 +72,7 @@ export function ProjectSelection() {
   }, [addingProject]);
 
   const handleTerminalEsc = (pid: number) => {
-    const shellCwd = getCwd(pid);
+    const shellCwd = getCwd("__add-project", pid);
     setCapturedPath(shellCwd);
     destroySession("__add-project");
     setTerminalActive(false);
@@ -209,7 +209,7 @@ export function ProjectSelection() {
         </Box>
         <Box marginBottom={1}>
           <Text dimColor>
-            cd to your project directory, then press Esc to confirm
+            cd to your project directory, then press Esc Confirm
           </Text>
         </Box>
         <EmbeddedTerminal

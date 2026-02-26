@@ -2,7 +2,7 @@ import { $ } from "bun";
 import { getAllActiveTasks } from "./db.js";
 import { getGitStatusWithPr } from "./git.js";
 import { useStore } from "../store/index.js";
-import type { TaskStatusColor } from "../store/types.js";
+import type { GitStatus, TaskStatusColor } from "../store/types.js";
 
 const TMUX_SOCKET = "gladius";
 
@@ -53,50 +53,25 @@ export async function computeTaskStatus(
   consoleInteracted: boolean,
   consoleFocused: boolean,
 ): Promise<TaskStatusColor> {
-  // Console currently focused → always yellow
-  if (consoleFocused) return "yellow";
-
-  // Check LLM status if model is set
-  let llmStatus: "orange" | "red" | null = null;
-  if (model) {
-    llmStatus = await getLlmStatus(taskId);
-  }
-
-  if (consoleInteracted) {
-    // LLM is working after user input → yellow
-    if (llmStatus === "orange") return "yellow";
-    // LLM idle or no session → interaction cycle is over, clear the flag
-    useStore.getState().clearConsoleInteracted(taskId);
-  }
-
-  if (llmStatus === "orange") return "orange";
-
-  // Check PR status
+  const llmStatus = model ? await getLlmStatus(taskId) : null;
+  let gitStatus: GitStatus | null = null;
   if (worktreePath) {
     try {
-      const gitStatus = await getGitStatusWithPr(worktreePath);
-      if (gitStatus.pr) {
-        if (
-          gitStatus.pr.hasConflicts ||
-          gitStatus.pr.unresolvedThreads > 0 ||
-          gitStatus.pr.ciFailed > 0
-        )
-          return "red";
-        if (gitStatus.pr.ciPending > 0) return "yellow";
-        if (
-          gitStatus.pr.state === "open" &&
-          !gitStatus.pr.hasConflicts &&
-          gitStatus.pr.ciFailed === 0 &&
-          gitStatus.pr.unresolvedThreads === 0
-        )
-          return "green";
-      }
-    } catch {}
+      gitStatus = await getGitStatusWithPr(
+        worktreePath,
+        branchName || undefined,
+      );
+    } catch {
+      gitStatus = null;
+    }
   }
-
-  if (llmStatus === "red") return "red";
-
-  return "none";
+  return resolveTaskStatusColor(
+    taskId,
+    llmStatus,
+    gitStatus,
+    consoleInteracted,
+    consoleFocused,
+  );
 }
 
 /**
@@ -105,25 +80,97 @@ export async function computeTaskStatus(
 export async function computeAllTaskStatuses(): Promise<
   Record<string, TaskStatusColor>
 > {
+  return refreshAllTaskStatuses();
+}
+
+/**
+ * Refresh all active tasks from a single status pipeline:
+ * - fetch git+PR status
+ * - compute task color
+ * - update store gitStatuses and taskStatuses together
+ */
+export async function refreshAllTaskStatuses(options?: {
+  forcePrRefresh?: boolean;
+}): Promise<Record<string, TaskStatusColor>> {
   const tasks = getAllActiveTasks();
   const state = useStore.getState();
   const interacted = state.consoleInteractedTasks;
   const focusedTaskId =
     state.focusPane === "console" ? state.activeTask?.id : null;
-  const results: Record<string, TaskStatusColor> = {};
+  const taskStatuses: Record<string, TaskStatusColor> = {};
+  const gitStatuses: Record<string, GitStatus> = {};
 
   await Promise.all(
     tasks.map(async (task) => {
-      results[task.id] = await computeTaskStatus(
+      const llmStatus = task.model ? await getLlmStatus(task.id) : null;
+      let gitStatus: GitStatus | null = null;
+
+      if (task.worktree_path) {
+        try {
+          gitStatus = await getGitStatusWithPr(
+            task.worktree_path,
+            task.branch_name || undefined,
+            { forcePrRefresh: options?.forcePrRefresh === true },
+          );
+        } catch {
+          gitStatus = null;
+        }
+      }
+
+      if (gitStatus) {
+        gitStatuses[task.id] = gitStatus;
+      }
+
+      taskStatuses[task.id] = resolveTaskStatusColor(
         task.id,
-        task.worktree_path,
-        task.branch_name,
-        task.model,
+        llmStatus,
+        gitStatus,
         interacted.has(task.id),
         task.id === focusedTaskId,
       );
     }),
   );
 
-  return results;
+  useStore.setState((prev) => ({
+    gitStatuses: { ...prev.gitStatuses, ...gitStatuses },
+    taskStatuses,
+  }));
+
+  return taskStatuses;
+}
+
+function resolveTaskStatusColor(
+  taskId: string,
+  llmStatus: "orange" | "red" | null,
+  gitStatus: GitStatus | null,
+  consoleInteracted: boolean,
+  consoleFocused: boolean,
+): TaskStatusColor {
+  if (consoleFocused) return "yellow";
+
+  if (consoleInteracted) {
+    if (llmStatus === "orange") return "yellow";
+    useStore.getState().clearConsoleInteracted(taskId);
+  }
+
+  if (llmStatus === "orange") return "orange";
+
+  const pr = gitStatus?.pr;
+  if (pr) {
+    if (pr.hasConflicts || pr.unresolvedThreads > 0 || pr.ciFailed > 0) {
+      return "red";
+    }
+    if (pr.ciPending > 0) return "yellow";
+    if (
+      pr.state === "open" &&
+      !pr.hasConflicts &&
+      pr.ciFailed === 0 &&
+      pr.unresolvedThreads === 0
+    ) {
+      return "green";
+    }
+  }
+
+  if (llmStatus === "red") return "red";
+  return "none";
 }

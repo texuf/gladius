@@ -2,7 +2,11 @@ import React, { useEffect, useRef, useState } from "react";
 import { Box, Text } from "ink";
 import { Terminal } from "@xterm/headless";
 import { execSync } from "child_process";
-import { getOrCreateSession, getSession } from "../services/terminalManager.js";
+import {
+  getOrCreateSession,
+  getSession,
+  getSessionCwd,
+} from "../services/terminalManager.js";
 import { useStore } from "../store/index.js";
 
 interface EmbeddedTerminalProps {
@@ -20,8 +24,18 @@ interface EmbeddedTerminalProps {
 
 // Convert xterm buffer cell attributes to ANSI SGR escape sequences
 function cellToAnsi(
-  cell: { getFgColor: () => number; getBgColor: () => number; isBold: () => number; isDim: () => number; isItalic: () => number; isUnderline: () => number; isInverse: () => number; getFgColorMode: () => number; getBgColorMode: () => number },
-  prevCell: typeof cell | null
+  cell: {
+    getFgColor: () => number;
+    getBgColor: () => number;
+    isBold: () => number;
+    isDim: () => number;
+    isItalic: () => number;
+    isUnderline: () => number;
+    isInverse: () => number;
+    getFgColorMode: () => number;
+    getBgColorMode: () => number;
+  },
+  prevCell: typeof cell | null,
 ): string {
   const codes: number[] = [];
 
@@ -43,18 +57,30 @@ function cellToAnsi(
     if (inverse) codes.push(7);
 
     if (fgMode === 1) codes.push(38, 5, fg);
-    else if (fgMode === 2) codes.push(38, 2, (fg >> 16) & 0xff, (fg >> 8) & 0xff, fg & 0xff);
-    else if (fgMode === 3) { if (fg < 8) codes.push(30 + fg); else codes.push(90 + (fg - 8)); }
+    else if (fgMode === 2)
+      codes.push(38, 2, (fg >> 16) & 0xff, (fg >> 8) & 0xff, fg & 0xff);
+    else if (fgMode === 3) {
+      if (fg < 8) codes.push(30 + fg);
+      else codes.push(90 + (fg - 8));
+    }
 
     if (bgMode === 1) codes.push(48, 5, bg);
-    else if (bgMode === 2) codes.push(48, 2, (bg >> 16) & 0xff, (bg >> 8) & 0xff, bg & 0xff);
-    else if (bgMode === 3) { if (bg < 8) codes.push(40 + bg); else codes.push(100 + (bg - 8)); }
+    else if (bgMode === 2)
+      codes.push(48, 2, (bg >> 16) & 0xff, (bg >> 8) & 0xff, bg & 0xff);
+    else if (bgMode === 3) {
+      if (bg < 8) codes.push(40 + bg);
+      else codes.push(100 + (bg - 8));
+    }
   } else {
     const changed =
-      fg !== prevCell.getFgColor() || bg !== prevCell.getBgColor() ||
-      fgMode !== prevCell.getFgColorMode() || bgMode !== prevCell.getBgColorMode() ||
-      bold !== prevCell.isBold() || dim !== prevCell.isDim() ||
-      italic !== prevCell.isItalic() || underline !== prevCell.isUnderline() ||
+      fg !== prevCell.getFgColor() ||
+      bg !== prevCell.getBgColor() ||
+      fgMode !== prevCell.getFgColorMode() ||
+      bgMode !== prevCell.getBgColorMode() ||
+      bold !== prevCell.isBold() ||
+      dim !== prevCell.isDim() ||
+      italic !== prevCell.isItalic() ||
+      underline !== prevCell.isUnderline() ||
       inverse !== prevCell.isInverse();
 
     if (!changed) return "";
@@ -67,12 +93,20 @@ function cellToAnsi(
     if (inverse) codes.push(7);
 
     if (fgMode === 1) codes.push(38, 5, fg);
-    else if (fgMode === 2) codes.push(38, 2, (fg >> 16) & 0xff, (fg >> 8) & 0xff, fg & 0xff);
-    else if (fgMode === 3) { if (fg < 8) codes.push(30 + fg); else codes.push(90 + (fg - 8)); }
+    else if (fgMode === 2)
+      codes.push(38, 2, (fg >> 16) & 0xff, (fg >> 8) & 0xff, fg & 0xff);
+    else if (fgMode === 3) {
+      if (fg < 8) codes.push(30 + fg);
+      else codes.push(90 + (fg - 8));
+    }
 
     if (bgMode === 1) codes.push(48, 5, bg);
-    else if (bgMode === 2) codes.push(48, 2, (bg >> 16) & 0xff, (bg >> 8) & 0xff, bg & 0xff);
-    else if (bgMode === 3) { if (bg < 8) codes.push(40 + bg); else codes.push(100 + (bg - 8)); }
+    else if (bgMode === 2)
+      codes.push(48, 2, (bg >> 16) & 0xff, (bg >> 8) & 0xff, bg & 0xff);
+    else if (bgMode === 3) {
+      if (bg < 8) codes.push(40 + bg);
+      else codes.push(100 + (bg - 8));
+    }
   }
 
   if (codes.length === 0) return "";
@@ -86,7 +120,10 @@ function bufferToAnsiLines(term: Terminal): string[] {
 
   for (let y = baseY; y < baseY + term.rows; y++) {
     const line = buffer.getLine(y);
-    if (!line) { lines.push(""); continue; }
+    if (!line) {
+      lines.push("");
+      continue;
+    }
 
     let result = "";
     let prevCell: any = null;
@@ -108,7 +145,12 @@ function bufferToAnsiLines(term: Terminal): string[] {
   return lines;
 }
 
-export function getCwd(pid: number): string {
+export function getCwd(taskId: string, pid: number): string {
+  const sessionPath = getSessionCwd(taskId);
+  if (sessionPath) {
+    return sessionPath;
+  }
+
   try {
     const result = execSync(`lsof -a -p ${pid} -d cwd -Fn`, {
       encoding: "utf-8",
@@ -124,9 +166,22 @@ export function getCwd(pid: number): string {
 const DEFAULT_CHROME_ROWS = 7;
 const DEFAULT_CHROME_COLS = 4;
 
-export function EmbeddedTerminal({ taskId, cwd, command, focused = true, paused = false, rows: propRows, cols: propCols, singleEsc = false, onEsc, onError }: EmbeddedTerminalProps) {
+export function EmbeddedTerminal({
+  taskId,
+  cwd,
+  command,
+  focused = true,
+  paused = false,
+  rows: propRows,
+  cols: propCols,
+  singleEsc = false,
+  onEsc,
+  onError,
+}: EmbeddedTerminalProps) {
   const [lines, setLines] = useState<string[]>([]);
-  const stdinListenerRef = useRef<((data: Buffer | string) => void) | null>(null);
+  const stdinListenerRef = useRef<((data: Buffer | string) => void) | null>(
+    null,
+  );
   const renderIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const focusedRef = useRef(focused);
@@ -139,7 +194,9 @@ export function EmbeddedTerminal({ taskId, cwd, command, focused = true, paused 
     focusedRef.current = focused;
     if (focused && pendingInputRef.current.length > 0 && procRef.current) {
       for (const data of pendingInputRef.current) {
-        try { procRef.current.terminal!.write(data); } catch {}
+        try {
+          procRef.current.terminal!.write(data);
+        } catch {}
       }
       pendingInputRef.current = [];
     }
@@ -150,8 +207,12 @@ export function EmbeddedTerminal({ taskId, cwd, command, focused = true, paused 
 
   // Attach to (or create) persistent session; detach on unmount
   useEffect(() => {
-    const cols = propCols ?? Math.max(40, (process.stdout.columns || 80) - DEFAULT_CHROME_COLS);
-    const rows = propRows ?? Math.max(10, (process.stdout.rows || 24) - DEFAULT_CHROME_ROWS);
+    const cols =
+      propCols ??
+      Math.max(40, (process.stdout.columns || 80) - DEFAULT_CHROME_COLS);
+    const rows =
+      propRows ??
+      Math.max(10, (process.stdout.rows || 24) - DEFAULT_CHROME_ROWS);
 
     let session;
     try {
@@ -257,8 +318,14 @@ export function EmbeddedTerminal({ taskId, cwd, command, focused = true, paused 
     // Handle resize
     const onResize = () => {
       if (propRows || propCols) return;
-      const newCols = Math.max(40, (process.stdout.columns || 80) - DEFAULT_CHROME_COLS);
-      const newRows = Math.max(10, (process.stdout.rows || 24) - DEFAULT_CHROME_ROWS);
+      const newCols = Math.max(
+        40,
+        (process.stdout.columns || 80) - DEFAULT_CHROME_COLS,
+      );
+      const newRows = Math.max(
+        10,
+        (process.stdout.rows || 24) - DEFAULT_CHROME_ROWS,
+      );
       try {
         proc.terminal!.resize(newCols, newRows);
         xterm.resize(newCols, newRows);
