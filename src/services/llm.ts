@@ -1,4 +1,35 @@
 /**
+ * Generate a standup summary from a pre-built prompt using the OpenAI API.
+ */
+export async function generateStandupSummary(
+  apiKey: string,
+  promptText: string,
+): Promise<string> {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: promptText }],
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`OpenAI API error (${response.status}): ${err}`);
+  }
+
+  const data = (await response.json()) as {
+    choices: Array<{ message: { content: string } }>;
+  };
+  return data.choices[0]?.message?.content?.trim() || "";
+}
+
+/**
  * Generate a PR title and description from commit messages using the OpenAI API.
  */
 export async function generatePrDescription(

@@ -409,3 +409,35 @@ export function getTaskEvents(taskId: string): TaskEvent[] {
     )
     .all(taskId) as TaskEvent[];
 }
+
+export function getTasksActiveDuringWindow(
+  sinceISO: string,
+): Array<
+  Task & { project_name: string; group_name: string; project_path: string }
+> {
+  const db = getDb();
+  return db
+    .query(
+      `SELECT t.*, p.name AS project_name, p.group_name, p.path AS project_path
+       FROM tasks t
+       JOIN projects p ON t.project_id = p.id
+       WHERE t.created_at <= datetime('now')
+         AND (t.status = 'active' OR t.closed_at >= ?)
+       ORDER BY p.group_name ASC, t.sort_order ASC`,
+    )
+    .all(sinceISO) as Array<
+    Task & { project_name: string; group_name: string; project_path: string }
+  >;
+}
+
+export function getTaskEventsSince(
+  taskId: string,
+  sinceISO: string,
+): TaskEvent[] {
+  const db = getDb();
+  return db
+    .query(
+      "SELECT * FROM task_events WHERE task_id = ? AND created_at >= ? ORDER BY created_at ASC",
+    )
+    .all(taskId, sinceISO) as TaskEvent[];
+}

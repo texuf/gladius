@@ -13,6 +13,7 @@ import { TaskSwitcher } from "./views/TaskSwitcher.js";
 import { PrComments } from "./views/PrComments.js";
 import { Settings } from "./views/Settings.js";
 import { CreatePr } from "./views/CreatePr.js";
+import { Standup } from "./views/Standup.js";
 import { HotkeyHints } from "./components/HotkeyHints.js";
 import { hasModifier } from "./utils/keyboard.js";
 import type { ViewState } from "./store/types.js";
@@ -38,6 +39,7 @@ export function App() {
       case "projects":
       case "settings":
       case "taskSwitcher":
+      case "standup":
         return preferred;
       case "tasks":
         return hasProject ? "tasks" : "projects";
@@ -172,6 +174,8 @@ export function App() {
         return <Settings />;
       case "createPr":
         return <CreatePr />;
+      case "standup":
+        return <Standup />;
       default:
         return <ProjectSelection />;
     }

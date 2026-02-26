@@ -51,6 +51,7 @@ export function HotkeyHints() {
       "Ctrl+N New Project",
       "g Edit Group",
       "d Delete",
+      "u Standup",
       "s Settings",
     );
   } else if (view === "tasks") {
@@ -116,6 +117,8 @@ export function HotkeyHints() {
       const escHint = focusPane === "console" ? "Esc" : "Esc×2";
       hints.push(`${escHint} Unfocus (${focusPane})`);
     }
+  } else if (view === "standup") {
+    hints.push("c Copy", "r Regenerate", "Esc Back");
   } else if (view === "createPr") {
     hints.push("Esc Cancel");
   } else if (view === "prComments") {

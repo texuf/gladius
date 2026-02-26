@@ -795,6 +795,22 @@ export async function createPullRequest(
   return { number: numMatch ? parseInt(numMatch[1], 10) : 0, url };
 }
 
+/**
+ * Get commits since a given timestamp for a repo path.
+ */
+export async function getCommitsSince(
+  repoPath: string,
+  sinceISO: string,
+): Promise<string> {
+  try {
+    return (
+      await $`git -C ${repoPath} log --all --since=${sinceISO} --pretty=format:%h %s`.text()
+    ).trim();
+  } catch {
+    return "";
+  }
+}
+
 export function formatPrStatus(pr: PrStatus): string {
   const state =
     pr.state === "open" ? "OPEN" : pr.state === "merged" ? "MERGED" : "CLOSED";

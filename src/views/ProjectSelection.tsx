@@ -137,6 +137,8 @@ export function ProjectSelection() {
       if (project) {
         setConfirmDelete(project);
       }
+    } else if (input === "u") {
+      setView("standup");
     } else if (input === "g" && projects.length > 0) {
       const project = projects[selectedIndex];
       if (project) {
