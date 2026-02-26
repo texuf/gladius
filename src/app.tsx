@@ -87,7 +87,7 @@ export function App() {
       });
     };
     poll();
-    const interval = setInterval(poll, 5000);
+    const interval = setInterval(poll, 30000);
     return () => clearInterval(interval);
   }, []);
 
