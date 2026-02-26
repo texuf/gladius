@@ -65,6 +65,9 @@ export function PrComments() {
   const setView = useStore((s) => s.setView);
   const setFocusPane = useStore((s) => s.setFocusPane);
   const setGitStatus = useStore((s) => s.setGitStatus);
+  const setPrCommentsSelectionKind = useStore(
+    (s) => s.setPrCommentsSelectionKind,
+  );
 
   const [threads, setThreads] = useState<ReviewThread[]>([]);
   const [ciFailures, setCiFailures] = useState<CiCheckFailure[]>([]);
@@ -82,6 +85,28 @@ export function PrComments() {
   const selectedThread = !isCiSelected
     ? threads[selected - ciFailures.length]
     : null;
+
+  useEffect(() => {
+    if (totalItems === 0) {
+      setPrCommentsSelectionKind("none");
+      return;
+    }
+    if (selected < ciFailures.length) {
+      setPrCommentsSelectionKind("ci");
+      return;
+    }
+    if (selected < totalItems) {
+      setPrCommentsSelectionKind("thread");
+      return;
+    }
+    setPrCommentsSelectionKind("none");
+  }, [selected, ciFailures.length, totalItems, setPrCommentsSelectionKind]);
+
+  useEffect(() => {
+    return () => {
+      setPrCommentsSelectionKind("none");
+    };
+  }, [setPrCommentsSelectionKind]);
 
   useEffect(() => {
     if (!activeTask?.worktree_path) {

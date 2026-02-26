@@ -69,6 +69,7 @@ export type ViewState =
   | "createPr";
 
 export type FocusPane = "none" | "notes" | "terminal" | "console";
+export type PrCommentsSelectionKind = "none" | "ci" | "thread";
 
 export interface ReviewThread {
   id: string;
@@ -109,6 +110,7 @@ export interface AppState {
 
   // Task View
   focusPane: FocusPane;
+  prCommentsSelectionKind: PrCommentsSelectionKind;
   chordBuffer: string;
   copyMode: boolean;
 
@@ -129,6 +131,7 @@ export interface AppState {
   setSelectedIndex: (index: number) => void;
   setModal: (modal: ModalState) => void;
   setFocusPane: (pane: FocusPane) => void;
+  setPrCommentsSelectionKind: (kind: PrCommentsSelectionKind) => void;
   setChordBuffer: (chord: string) => void;
   setCopyMode: (copyMode: boolean) => void;
   setAddingProject: (adding: boolean) => void;
