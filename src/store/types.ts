@@ -48,6 +48,7 @@ export type TaskStatusColor = "green" | "red" | "orange" | "yellow" | "purple" |
 
 export interface GitStatus {
   branch: string;
+  hasTrackingBranch: boolean;
   ahead: number;
   behind: number;
   behindMain: number;

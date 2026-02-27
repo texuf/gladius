@@ -7,6 +7,7 @@ import { TerminalPane } from "../components/TerminalPane.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { processChord } from "../utils/keyboard.js";
 import {
+  fetchLatestMain,
   formatPrStatus,
   getGitStatus,
   getGitStatusWithPr,
@@ -225,20 +226,31 @@ export function TaskView() {
 
     // Refresh git + PR status and reset polling
     if (input === "r" && !key.super) {
+      const taskId = activeTask?.id;
+      const worktreePath = activeTask?.worktree_path;
       setFetching(true);
       if (gitIntervalRef.current) clearInterval(gitIntervalRef.current);
       if (prIntervalRef.current) clearInterval(prIntervalRef.current);
       // Force-refresh global task statuses and git/PR status cache so every
       // view reads the same up-to-date source of truth immediately.
-      refreshAllTaskStatuses({ forcePrRefresh: true }).finally(() => {
-        setFetching(false);
-        gitIntervalRef.current = setInterval(pollGit, 5000);
-        // Only restart PR polling if checks are still pending
-        const pr = useStore.getState().gitStatuses[activeTask!.id]?.pr;
-        if (!pr || pr.ciPending > 0) {
-          prIntervalRef.current = setInterval(pollPr, 30000);
-        }
-      });
+      Promise.resolve()
+        .then(async () => {
+          if (worktreePath) {
+            await fetchLatestMain(worktreePath);
+          }
+        })
+        .then(() => refreshAllTaskStatuses({ forcePrRefresh: true }))
+        .finally(() => {
+          setFetching(false);
+          gitIntervalRef.current = setInterval(pollGit, 5000);
+          // Only restart PR polling if checks are still pending
+          if (taskId) {
+            const pr = useStore.getState().gitStatuses[taskId]?.pr;
+            if (!pr || pr.ciPending > 0) {
+              prIntervalRef.current = setInterval(pollPr, 30000);
+            }
+          }
+        });
       return;
     }
 
@@ -292,6 +304,11 @@ export function TaskView() {
           ...useStore.getState().taskStatuses,
           [activeTask.id]: "none",
         });
+        // Remove PR from git status so the header clears immediately
+        const currentGitStatus = gitStatuses[activeTask.id];
+        if (currentGitStatus) {
+          useStore.getState().setGitStatus(activeTask.id, { ...currentGitStatus, pr: null });
+        }
       } else if (!pr) {
         setView("createPr");
       }
@@ -429,6 +446,11 @@ export function TaskView() {
   if (!activeTask) return null;
 
   const gitStatus = gitStatuses[activeTask.id];
+  const isEvenWithTracking =
+    !!gitStatus &&
+    gitStatus.hasTrackingBranch &&
+    gitStatus.ahead === 0 &&
+    gitStatus.behind === 0;
 
   // Aggregate status dots for ALL tasks (including active)
   const allDots = { green: 0, red: 0, orange: 0, yellow: 0, purple: 0 };
@@ -461,12 +483,18 @@ export function TaskView() {
               {gitStatus && (
                 <>
                   <Text color="cyan"> {gitStatus.branch}</Text>
-                  {(gitStatus.ahead > 0 || gitStatus.behind > 0) && (
+                  {(gitStatus.ahead > 0 || gitStatus.behind > 0 || isEvenWithTracking) && (
                     <Text color="cyan">
                       {" ("}
-                      {gitStatus.ahead > 0 && <Text color="yellow">+{gitStatus.ahead}</Text>}
-                      {gitStatus.ahead > 0 && gitStatus.behind > 0 && "/"}
-                      {gitStatus.behind > 0 && <Text color="yellow">-{gitStatus.behind}</Text>}
+                      {isEvenWithTracking ? (
+                        <Text color="yellow">=</Text>
+                      ) : (
+                        <>
+                          {gitStatus.ahead > 0 && <Text color="yellow">+{gitStatus.ahead}</Text>}
+                          {gitStatus.ahead > 0 && gitStatus.behind > 0 && "/"}
+                          {gitStatus.behind > 0 && <Text color="yellow">-{gitStatus.behind}</Text>}
+                        </>
+                      )}
                       {")"}
                     </Text>
                   )}

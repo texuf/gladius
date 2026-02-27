@@ -29,15 +29,22 @@ export async function getGitStatus(
 ): Promise<GitStatus> {
   const branch = branchName || (await getCurrentBranch(repoPath));
 
+  let hasTrackingBranch = false;
   let ahead = 0;
   let behind = 0;
   let behindMain = 0;
   let changedFiles = 0;
 
   try {
-    // Ahead/behind remote tracking branch
+    // Ahead/behind upstream tracking branch (if configured for this branch)
+    const upstream = (
+      await $`git -C ${repoPath} rev-parse --abbrev-ref --symbolic-full-name ${branch}@{upstream}`.text()
+    ).trim();
+    if (upstream) {
+      hasTrackingBranch = true;
+    }
     const revList =
-      await $`git -C ${repoPath} rev-list --left-right --count ${branch}...origin/${branch} 2>/dev/null`.text();
+      await $`git -C ${repoPath} rev-list --left-right --count ${branch}...${upstream} 2>/dev/null`.text();
     const parts = revList.trim().split(/\s+/);
     if (parts.length === 2) {
       ahead = parseInt(parts[0], 10) || 0;
@@ -67,7 +74,15 @@ export async function getGitStatus(
     // Not a git repo
   }
 
-  return { branch, ahead, behind, behindMain, changedFiles, pr: null };
+  return {
+    branch,
+    hasTrackingBranch,
+    ahead,
+    behind,
+    behindMain,
+    changedFiles,
+    pr: null,
+  };
 }
 
 /**
@@ -321,6 +336,8 @@ export function formatGitStatus(status: GitStatus): string {
 
   if (status.ahead > 0 || status.behind > 0) {
     parts.push(`(+${status.ahead}/-${status.behind})`);
+  } else if (status.hasTrackingBranch) {
+    parts.push("(=)");
   }
 
   if (status.behindMain > 0) {
@@ -334,6 +351,11 @@ export function formatGitStatus(status: GitStatus): string {
   }
 
   return parts.join(" ");
+}
+
+export async function fetchLatestMain(repoPath: string): Promise<void> {
+  const main = await getMainBranch(repoPath);
+  await $`git -C ${repoPath} fetch origin ${main}`.quiet().nothrow();
 }
 
 /**
