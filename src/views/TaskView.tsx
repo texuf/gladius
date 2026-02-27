@@ -67,11 +67,7 @@ export function TaskView() {
       destroySession(`${activeTask.id}-console`);
     }
 
-    const updates = {
-      model,
-      // Keep legacy field empty once provider-specific IDs are in use.
-      session_id: null,
-    };
+    const updates = { model };
     updateTask(activeTask.id, updates);
     setActiveTask({ ...activeTask, ...updates });
     setTasks(

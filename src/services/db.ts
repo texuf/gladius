@@ -7,6 +7,7 @@ import type { Project, Repo, Task, TaskEvent } from "../store/types.js";
 
 const GLADIUS_DIR = join(homedir(), ".gladius");
 const DB_PATH = join(GLADIUS_DIR, "gladius.db");
+const CLEANUP_MIGRATION_KEY = "migration.cleanup_2026_02_27";
 
 let db: Database;
 
@@ -25,28 +26,33 @@ export function getDb(): Database {
 }
 
 function initSchema() {
-  // Keep legacy bootstrap DDL so brand-new installs and historical DBs both
-  // pass through the same migration pipeline to the current schema.
   db.exec(`
     CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      path TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      last_accessed_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS repos (
+      id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       path TEXT NOT NULL UNIQUE,
-      group_name TEXT NOT NULL,
+      project_id TEXT NOT NULL REFERENCES projects(id),
       created_at TEXT NOT NULL,
       last_accessed_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL REFERENCES projects(id),
+      repo_id TEXT NOT NULL REFERENCES repos(id),
       label TEXT NOT NULL,
       description TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active',
       model TEXT,
       claude_session_id TEXT,
       codex_session_id TEXT,
-      session_id TEXT,
       worktree_path TEXT,
       branch_name TEXT,
       sort_order INTEGER NOT NULL DEFAULT 0,
@@ -87,199 +93,7 @@ function hasColumn(tableName: string, columnName: string): boolean {
   return columns.some((column) => column.name === columnName);
 }
 
-function uniqueProjectName(baseName: string, taken: Set<string>): string {
-  const base = baseName.trim() || "default";
-  if (!taken.has(base)) {
-    taken.add(base);
-    return base;
-  }
-
-  let index = 2;
-  let candidate = `${base}-${index}`;
-  while (taken.has(candidate)) {
-    index += 1;
-    candidate = `${base}-${index}`;
-  }
-  taken.add(candidate);
-  return candidate;
-}
-
-function migrateLegacyProjectModel(): void {
-  const hasLegacyProjectsTable = hasTable("projects") && hasColumn("projects", "path");
-  const hasLegacyTasksProjectId = hasTable("tasks") && hasColumn("tasks", "project_id");
-
-  if (!hasLegacyProjectsTable || !hasLegacyTasksProjectId) {
-    return;
-  }
-
-  const hasClaudeSessionColumn = hasColumn("tasks", "claude_session_id");
-  const hasCodexSessionColumn = hasColumn("tasks", "codex_session_id");
-  const hasLegacySessionColumn = hasColumn("tasks", "session_id");
-
-  if (!hasClaudeSessionColumn) {
-    db.exec("ALTER TABLE tasks ADD COLUMN claude_session_id TEXT;");
-  }
-  if (!hasCodexSessionColumn) {
-    db.exec("ALTER TABLE tasks ADD COLUMN codex_session_id TEXT;");
-  }
-  if (!hasLegacySessionColumn) {
-    db.exec("ALTER TABLE tasks ADD COLUMN session_id TEXT;");
-  }
-
-  const legacyRepos = db
-    .query(
-      "SELECT id, name, path, group_name, created_at, last_accessed_at FROM projects",
-    )
-    .all() as Array<{
-    id: string;
-    name: string;
-    path: string;
-    group_name: string | null;
-    created_at: string;
-    last_accessed_at: string;
-  }>;
-
-  const projectIdByPath = new Map<string, string>();
-  const projectRows: Project[] = [];
-  const takenProjectNames = new Set<string>();
-
-  for (const repo of legacyRepos) {
-    const projectPath = deriveProjectPath(repo.path);
-    if (projectIdByPath.has(projectPath)) continue;
-
-    const projectName = uniqueProjectName(
-      repo.group_name?.trim() || deriveProjectName(projectPath),
-      takenProjectNames,
-    );
-
-    const id = uuid();
-    projectIdByPath.set(projectPath, id);
-    projectRows.push({
-      id,
-      name: projectName,
-      path: projectPath,
-      created_at: repo.created_at,
-      last_accessed_at: repo.last_accessed_at,
-    });
-  }
-
-  if (projectRows.length === 0) {
-    const now = new Date().toISOString();
-    const fallbackPath = join(homedir(), "default");
-    projectRows.push({
-      id: uuid(),
-      name: "default",
-      path: fallbackPath,
-      created_at: now,
-      last_accessed_at: now,
-    });
-    projectIdByPath.set(fallbackPath, projectRows[0].id);
-  }
-
-  db.exec("PRAGMA foreign_keys = OFF;");
-  db.exec("BEGIN TRANSACTION;");
-  try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS projects_new (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE,
-        path TEXT NOT NULL UNIQUE,
-        created_at TEXT NOT NULL,
-        last_accessed_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS repos (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        path TEXT NOT NULL UNIQUE,
-        project_id TEXT NOT NULL REFERENCES projects(id),
-        created_at TEXT NOT NULL,
-        last_accessed_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS tasks_new (
-        id TEXT PRIMARY KEY,
-        repo_id TEXT NOT NULL REFERENCES repos(id),
-        label TEXT NOT NULL,
-        description TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'active',
-        model TEXT,
-        claude_session_id TEXT,
-        codex_session_id TEXT,
-        session_id TEXT,
-        worktree_path TEXT,
-        branch_name TEXT,
-        sort_order INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL,
-        last_accessed_at TEXT NOT NULL,
-        closed_at TEXT
-      );
-    `);
-
-    const insertProject = db.query(
-      "INSERT INTO projects_new (id, name, path, created_at, last_accessed_at) VALUES (?, ?, ?, ?, ?)",
-    );
-    for (const project of projectRows) {
-      insertProject.run(
-        project.id,
-        project.name,
-        project.path,
-        project.created_at,
-        project.last_accessed_at,
-      );
-    }
-
-    const insertRepo = db.query(
-      "INSERT INTO repos (id, name, path, project_id, created_at, last_accessed_at) VALUES (?, ?, ?, ?, ?, ?)",
-    );
-    for (const repo of legacyRepos) {
-      const projectPath = deriveProjectPath(repo.path);
-      const projectId =
-        projectIdByPath.get(projectPath) ||
-        projectRows[0].id;
-      insertRepo.run(
-        repo.id,
-        repo.name,
-        repo.path,
-        projectId,
-        repo.created_at,
-        repo.last_accessed_at,
-      );
-    }
-
-    db.exec(`
-      INSERT INTO tasks_new (
-        id, repo_id, label, description, status, model,
-        claude_session_id, codex_session_id, session_id,
-        worktree_path, branch_name, sort_order,
-        created_at, last_accessed_at, closed_at
-      )
-      SELECT
-        id, project_id, label, description, status, model,
-        claude_session_id, codex_session_id, session_id,
-        worktree_path, branch_name, sort_order,
-        created_at, last_accessed_at, closed_at
-      FROM tasks;
-
-      DROP TABLE tasks;
-      ALTER TABLE tasks_new RENAME TO tasks;
-
-      DROP TABLE projects;
-      ALTER TABLE projects_new RENAME TO projects;
-    `);
-
-    db.exec("COMMIT;");
-  } catch (error) {
-    db.exec("ROLLBACK;");
-    throw error;
-  } finally {
-    db.exec("PRAGMA foreign_keys = ON;");
-  }
-}
-
 function migrateSchema() {
-  migrateLegacyProjectModel();
-
   if (!hasTable("projects")) {
     db.exec(`
       CREATE TABLE projects (
@@ -370,7 +184,6 @@ function migrateSchema() {
         model TEXT,
         claude_session_id TEXT,
         codex_session_id TEXT,
-        session_id TEXT,
         worktree_path TEXT,
         branch_name TEXT,
         sort_order INTEGER NOT NULL DEFAULT 0,
@@ -381,77 +194,12 @@ function migrateSchema() {
     `);
   }
 
-  if (hasColumn("tasks", "project_id") && !hasColumn("tasks", "repo_id")) {
-    db.exec("PRAGMA foreign_keys = OFF;");
-    db.exec("BEGIN TRANSACTION;");
-    try {
-      db.exec(`
-        CREATE TABLE tasks_new (
-          id TEXT PRIMARY KEY,
-          repo_id TEXT NOT NULL REFERENCES repos(id),
-          label TEXT NOT NULL,
-          description TEXT NOT NULL,
-          status TEXT NOT NULL DEFAULT 'active',
-          model TEXT,
-          claude_session_id TEXT,
-          codex_session_id TEXT,
-          session_id TEXT,
-          worktree_path TEXT,
-          branch_name TEXT,
-          sort_order INTEGER NOT NULL DEFAULT 0,
-          created_at TEXT NOT NULL,
-          last_accessed_at TEXT NOT NULL,
-          closed_at TEXT
-        );
-
-        INSERT INTO tasks_new (
-          id, repo_id, label, description, status, model,
-          claude_session_id, codex_session_id, session_id,
-          worktree_path, branch_name, sort_order,
-          created_at, last_accessed_at, closed_at
-        )
-        SELECT
-          id, project_id, label, description, status, model,
-          claude_session_id, codex_session_id, session_id,
-          worktree_path, branch_name, sort_order,
-          created_at, last_accessed_at, closed_at
-        FROM tasks;
-
-        DROP TABLE tasks;
-        ALTER TABLE tasks_new RENAME TO tasks;
-      `);
-      db.exec("COMMIT;");
-    } catch (error) {
-      db.exec("ROLLBACK;");
-      throw error;
-    } finally {
-      db.exec("PRAGMA foreign_keys = ON;");
-    }
-  }
-
   if (!hasColumn("tasks", "claude_session_id")) {
     db.exec("ALTER TABLE tasks ADD COLUMN claude_session_id TEXT;");
   }
   if (!hasColumn("tasks", "codex_session_id")) {
     db.exec("ALTER TABLE tasks ADD COLUMN codex_session_id TEXT;");
   }
-  if (!hasColumn("tasks", "session_id")) {
-    db.exec("ALTER TABLE tasks ADD COLUMN session_id TEXT;");
-  }
-
-  db.exec(`
-    UPDATE tasks
-    SET claude_session_id = session_id
-    WHERE model = 'claude'
-      AND session_id IS NOT NULL
-      AND claude_session_id IS NULL;
-
-    UPDATE tasks
-    SET codex_session_id = session_id
-    WHERE model = 'codex'
-      AND session_id IS NOT NULL
-      AND codex_session_id IS NULL;
-  `);
 
   // In case repos were created without project bindings, assign a default.
   const orphaned = db
@@ -468,23 +216,15 @@ function migrateSchema() {
     }
   }
 
-  // Migrate app_state keys from project-based naming to repo-based naming.
-  const navRepo = db
-    .query("SELECT value FROM app_state WHERE key = 'nav.repo_id'")
-    .get() as { value: string | null } | null;
-  const navProject = db
-    .query("SELECT value FROM app_state WHERE key = 'nav.project_id'")
-    .get() as { value: string | null } | null;
-  if ((!navRepo || !navRepo.value) && navProject?.value) {
-    const repoExists = db
-      .query("SELECT id FROM repos WHERE id = ?")
-      .get(navProject.value) as { id: string } | null;
-    if (repoExists) {
-      db.query("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)").run(
-        "nav.repo_id",
-        navProject.value,
-      );
-    }
+  runOneTimeCleanupMigration();
+}
+
+function runOneTimeCleanupMigration(): void {
+  const done = db
+    .query("SELECT value FROM app_state WHERE key = ?")
+    .get(CLEANUP_MIGRATION_KEY) as { value: string | null } | null;
+  if (done?.value === "1") {
+    return;
   }
 
   const legacyReviewerRows = db
@@ -503,6 +243,98 @@ function migrateSchema() {
     }
   }
   db.query("DELETE FROM app_state WHERE key LIKE 'reviewers.project.%'").run();
+
+  const navProject = db
+    .query("SELECT value FROM app_state WHERE key = 'nav.project_id'")
+    .get() as { value: string | null } | null;
+  if (navProject?.value) {
+    const projectExists = db
+      .query("SELECT id FROM projects WHERE id = ?")
+      .get(navProject.value) as { id: string } | null;
+    if (!projectExists) {
+      const repo = db
+        .query("SELECT project_id FROM repos WHERE id = ?")
+        .get(navProject.value) as { project_id: string } | null;
+      if (repo?.project_id) {
+        db.query("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)").run(
+          "nav.project_id",
+          repo.project_id,
+        );
+      } else {
+        db.query("DELETE FROM app_state WHERE key = 'nav.project_id'").run();
+      }
+    }
+  }
+
+  if (hasColumn("tasks", "session_id")) {
+    db.exec("PRAGMA foreign_keys = OFF;");
+    db.exec("BEGIN TRANSACTION;");
+    try {
+      db.exec(`
+        CREATE TABLE tasks_clean (
+          id TEXT PRIMARY KEY,
+          repo_id TEXT NOT NULL REFERENCES repos(id),
+          label TEXT NOT NULL,
+          description TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          model TEXT,
+          claude_session_id TEXT,
+          codex_session_id TEXT,
+          worktree_path TEXT,
+          branch_name TEXT,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          last_accessed_at TEXT NOT NULL,
+          closed_at TEXT
+        );
+
+        INSERT INTO tasks_clean (
+          id, repo_id, label, description, status, model,
+          claude_session_id, codex_session_id,
+          worktree_path, branch_name, sort_order,
+          created_at, last_accessed_at, closed_at
+        )
+        SELECT
+          id,
+          repo_id,
+          label,
+          description,
+          status,
+          model,
+          CASE
+            WHEN claude_session_id IS NOT NULL THEN claude_session_id
+            WHEN model = 'claude' THEN session_id
+            ELSE NULL
+          END AS claude_session_id,
+          CASE
+            WHEN codex_session_id IS NOT NULL THEN codex_session_id
+            WHEN model = 'codex' THEN session_id
+            ELSE NULL
+          END AS codex_session_id,
+          worktree_path,
+          branch_name,
+          sort_order,
+          created_at,
+          last_accessed_at,
+          closed_at
+        FROM tasks;
+
+        DROP TABLE tasks;
+        ALTER TABLE tasks_clean RENAME TO tasks;
+      `);
+      db.exec("COMMIT;");
+    } catch (error) {
+      db.exec("ROLLBACK;");
+      throw error;
+    } finally {
+      db.exec("PRAGMA foreign_keys = ON;");
+    }
+  }
+
+  db.query("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)").run(
+    CLEANUP_MIGRATION_KEY,
+    "1",
+  );
 }
 
 function resolveProjectByPath(projectPath: string, preferredName?: string): Project {
@@ -549,16 +381,6 @@ function resolveProjectByPath(projectPath: string, preferredName?: string): Proj
   );
 
   return project;
-}
-
-function resolveProjectByName(projectName: string): Project {
-  const db = getDb();
-  const normalized = projectName.trim();
-  const existing = db
-    .query("SELECT * FROM projects WHERE name = ?")
-    .get(normalized) as Project | null;
-  if (existing) return existing;
-  return resolveProjectByPath(join(homedir(), normalized), normalized);
 }
 
 function touchProjectInternal(id: string): void {
@@ -752,35 +574,6 @@ export function deleteRepo(id: string): void {
   }
 }
 
-export function updateRepoProject(repoId: string, projectName: string): void {
-  const normalized = projectName.trim();
-  if (!normalized) {
-    throw new Error("Project name cannot be empty");
-  }
-
-  const db = getDb();
-  const old = db
-    .query("SELECT project_id FROM repos WHERE id = ?")
-    .get(repoId) as { project_id: string } | null;
-  const project = resolveProjectByName(normalized);
-
-  db.query("UPDATE repos SET project_id = ? WHERE id = ?").run(
-    project.id,
-    repoId,
-  );
-  touchProjectInternal(project.id);
-
-  // Remove now-empty old project if needed.
-  if (old?.project_id && old.project_id !== project.id) {
-    const remaining = db
-      .query("SELECT COUNT(*) AS count FROM repos WHERE project_id = ?")
-      .get(old.project_id) as { count: number };
-    if (remaining.count === 0) {
-      db.query("DELETE FROM projects WHERE id = ?").run(old.project_id);
-    }
-  }
-}
-
 export function refreshProjectRepos(projectId: string): {
   discovered: number;
   added: number;
@@ -930,7 +723,6 @@ export function createTask(
     model: null,
     claude_session_id: null,
     codex_session_id: null,
-    session_id: null,
     worktree_path: worktreePath,
     branch_name: branchName,
     sort_order: maxOrder.max_order + 1,
@@ -940,8 +732,8 @@ export function createTask(
   };
 
   db.query(
-    `INSERT INTO tasks (id, repo_id, label, description, status, model, claude_session_id, codex_session_id, session_id, worktree_path, branch_name, sort_order, created_at, last_accessed_at, closed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, repo_id, label, description, status, model, claude_session_id, codex_session_id, worktree_path, branch_name, sort_order, created_at, last_accessed_at, closed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     task.id,
     task.repo_id,
@@ -951,7 +743,6 @@ export function createTask(
     task.model,
     task.claude_session_id,
     task.codex_session_id,
-    task.session_id,
     task.worktree_path,
     task.branch_name,
     task.sort_order,

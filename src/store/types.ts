@@ -26,8 +26,6 @@ export interface Task {
   model: "claude" | "codex" | null;
   claude_session_id: string | null;
   codex_session_id: string | null;
-  // Legacy field retained for migration/backward compatibility.
-  session_id: string | null;
   worktree_path: string | null;
   branch_name: string | null;
   sort_order: number;

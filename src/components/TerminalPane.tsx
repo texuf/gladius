@@ -89,8 +89,8 @@ export function TerminalPane({
         effectiveModel,
         isTaskScoped && activeTask
           ? effectiveModel === "claude"
-            ? (activeTask.claude_session_id ?? activeTask.session_id)
-            : (activeTask.codex_session_id ?? activeTask.session_id)
+            ? activeTask.claude_session_id
+            : activeTask.codex_session_id
           : undefined,
         effectiveCwd ?? undefined,
       )
@@ -116,12 +116,12 @@ export function TerminalPane({
 
     const onCapture = (sessionId: string) => {
       if (activeTask.model === "claude") {
-        const updates = { claude_session_id: sessionId, session_id: sessionId };
+        const updates = { claude_session_id: sessionId };
         updateTask(activeTask.id, updates);
         setActiveTask({ ...activeTask, ...updates });
         setTasks(useStore.getState().tasks.map((t) => t.id === activeTask.id ? { ...t, ...updates } : t));
       } else {
-        const updates = { codex_session_id: sessionId, session_id: sessionId };
+        const updates = { codex_session_id: sessionId };
         updateTask(activeTask.id, updates);
         setActiveTask({ ...activeTask, ...updates });
         setTasks(useStore.getState().tasks.map((t) => t.id === activeTask.id ? { ...t, ...updates } : t));
