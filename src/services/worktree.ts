@@ -45,6 +45,39 @@ export async function createWorktree(
 }
 
 /**
+ * Adopt an existing remote branch into a new worktree.
+ * Unlike createWorktree, this checks out the remote branch directly
+ * instead of creating a new branch from origin/main.
+ */
+export async function adoptBranch(
+  projectPath: string,
+  remoteBranch: string,
+  label: string,
+): Promise<string> {
+  const projectName = basename(projectPath);
+  const worktreeDir = join(homedir(), ".wt", projectName);
+  const worktreePath = join(worktreeDir, label);
+
+  if (!existsSync(worktreeDir)) {
+    mkdirSync(worktreeDir, { recursive: true });
+  }
+
+  await $`git -C ${projectPath} fetch origin`.quiet().nothrow();
+
+  const localExists = await $`git -C ${projectPath} rev-parse --verify ${remoteBranch}`
+    .quiet().then(() => true, () => false);
+
+  if (localExists) {
+    await $`git -C ${projectPath} worktree add ${worktreePath} ${remoteBranch}`;
+  } else {
+    await $`git -C ${projectPath} worktree add ${worktreePath} -b ${remoteBranch} origin/${remoteBranch}`;
+  }
+
+  await copyIgnoredEnvFiles(projectPath, worktreePath);
+  return worktreePath;
+}
+
+/**
  * Delete a git worktree.
  */
 export async function deleteWorktree(

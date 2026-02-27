@@ -1,5 +1,5 @@
 import { $ } from "bun";
-import { getAllActiveTasks } from "./db.js";
+import { getAllActiveTasks, updateTask } from "./db.js";
 import { getGitStatusWithPr } from "./git.js";
 import { useStore } from "../store/index.js";
 import type { GitStatus, TaskStatusColor } from "../store/types.js";
@@ -59,7 +59,7 @@ export async function computeTaskStatus(
     try {
       gitStatus = await getGitStatusWithPr(
         worktreePath,
-        branchName || undefined,
+        undefined,
       );
     } catch {
       gitStatus = null;
@@ -109,12 +109,16 @@ export async function refreshAllTaskStatuses(options?: {
         try {
           gitStatus = await getGitStatusWithPr(
             task.worktree_path,
-            task.branch_name || undefined,
+            undefined,
             { forcePrRefresh: options?.forcePrRefresh === true },
           );
         } catch {
           gitStatus = null;
         }
+      }
+
+      if (gitStatus && gitStatus.branch !== task.branch_name) {
+        updateTask(task.id, { branch_name: gitStatus.branch });
       }
 
       if (gitStatus) {

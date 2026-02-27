@@ -38,7 +38,9 @@ export function HotkeyHints() {
 
   const hints: string[] = [];
 
-  if (view === "taskSwitcher") {
+  if (view === "adoptBranch") {
+    hints.push("⏎ Submit", "Esc Cancel");
+  } else if (view === "taskSwitcher") {
     hints.push("↑↓ Navigate", "⏎ Switch", "Esc Cancel");
   } else if (view === "projects" && addingRepo) {
     hints.push("Esc Cancel");
@@ -77,6 +79,7 @@ export function HotkeyHints() {
       "⏎ Open",
       "x Close",
       "Ctrl+N New",
+      "^A Adopt",
       "/ Search",
       "Ctrl+O Projects",
     );

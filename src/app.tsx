@@ -16,6 +16,7 @@ import { PrComments } from "./views/PrComments.js";
 import { Settings } from "./views/Settings.js";
 import { CreatePr } from "./views/CreatePr.js";
 import { Standup } from "./views/Standup.js";
+import { AdoptBranch } from "./views/AdoptBranch.js";
 import { HotkeyHints } from "./components/HotkeyHints.js";
 import { hasModifier } from "./utils/keyboard.js";
 import type { ViewState } from "./store/types.js";
@@ -50,6 +51,7 @@ export function App() {
         }
         return preferred;
       case "tasks":
+      case "adoptBranch":
         return hasActiveRepo
           ? "tasks"
           : hasActiveProject
@@ -167,6 +169,14 @@ export function App() {
       return;
     }
 
+    // Ctrl+A — Adopt existing branch (from task list)
+    if (input === "a" && mod) {
+      if (view === "tasks" && activeRepo) {
+        setView("adoptBranch");
+      }
+      return;
+    }
+
     // Cmd+P / Ctrl+P — Return to Task List
     if (input === "p" && mod && activeRepo) {
       setView("tasks");
@@ -205,6 +215,8 @@ export function App() {
         return <CreatePr />;
       case "standup":
         return <Standup />;
+      case "adoptBranch":
+        return <AdoptBranch />;
       default:
         return <RepoSelection />;
     }

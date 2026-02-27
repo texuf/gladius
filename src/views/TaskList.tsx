@@ -252,16 +252,9 @@ export function TaskList() {
               >
                 {isSelected ? " ▸ " : "   "}
                 {isClosing ? "[closing...] " : isClosed ? "[closed] " : ""}
-                {task.label}
-              </Text>
-            </Box>
-            <Box paddingLeft={4}>
-              <Text dimColor>
-                &quot;
                 {task.description.length > 50
                   ? task.description.slice(0, 50) + "..."
                   : task.description}
-                &quot;
               </Text>
             </Box>
             {status && !isClosed && (
