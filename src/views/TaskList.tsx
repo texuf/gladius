@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import { useStore } from "../store/index.js";
 import {
@@ -43,6 +43,7 @@ export function TaskList() {
 
   const [newTaskDesc, setNewTaskDesc] = useState("");
   const [creating, setCreating] = useState(false);
+  const activeTask = useStore((s) => s.activeTask);
 
   const activeTasks = tasks.filter(
     (t) => t.status === "active" || t.status === "closing",
@@ -53,6 +54,14 @@ export function TaskList() {
       (b.last_accessed_at || "").localeCompare(a.last_accessed_at || ""),
     );
   const allTasks = [...activeTasks, ...closedTasks];
+
+  // Restore selection to the active task when returning from taskView
+  useEffect(() => {
+    if (activeTask) {
+      const idx = allTasks.findIndex((t) => t.id === activeTask.id);
+      if (idx >= 0) setSelectedIndex(idx);
+    }
+  }, []);
 
   useInput((input, key) => {
     if (modal || creating) return;
