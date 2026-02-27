@@ -19,6 +19,15 @@ import { TextInputField } from "../components/TextInput.js";
 import { StatusDots } from "../components/StatusDots.js";
 import type { Task } from "../store/types.js";
 
+const SHORT_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function formatClosedDate(closedAt: string | null): string {
+  if (!closedAt) return "";
+  const d = new Date(closedAt);
+  return `${SHORT_DAYS[d.getDay()]} ${SHORT_MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
+
 export function TaskList() {
   const activeRepo = useStore((s) => s.activeRepo);
   const tasks = useStore((s) => s.tasks);
@@ -226,12 +235,14 @@ export function TaskList() {
         const isClosing = task.status === "closing";
         const status = gitStatuses[task.id];
         const taskColor = taskStatuses[task.id];
+        const prevTask = allTasks[i - 1];
+        const isFirstClosed = isClosed && prevTask && prevTask.status !== "closed";
         return (
           <Box
             key={task.id}
             flexDirection="column"
             paddingLeft={1}
-            marginBottom={1}
+            marginTop={isFirstClosed ? 1 : 0}
           >
             <Box>
               {!isClosed && !isClosing && taskColor && taskColor !== "none" ? (
@@ -251,7 +262,7 @@ export function TaskList() {
                 dimColor={(isClosed || isClosing) && !isSelected}
               >
                 {isSelected ? " ▸ " : "   "}
-                {isClosing ? "[closing...] " : isClosed ? "[closed] " : ""}
+                {isClosing ? "[closing...] " : isClosed ? `${formatClosedDate(task.closed_at)} - ` : ""}
                 {task.description.length > 50
                   ? task.description.slice(0, 50) + "..."
                   : task.description}
