@@ -35,32 +35,39 @@ export async function getGitStatus(
   let behindMain = 0;
   let changedFiles = 0;
 
+  let upstream = "";
   try {
-    // Ahead/behind upstream tracking branch (if configured for this branch)
-    const upstream = (
+    // Resolve upstream tracking branch (if configured for this branch)
+    upstream = (
       await $`git -C ${repoPath} rev-parse --abbrev-ref --symbolic-full-name ${branch}@{upstream}`.text()
     ).trim();
-    if (upstream) {
-      hasTrackingBranch = true;
-    }
-    const revList =
-      await $`git -C ${repoPath} rev-list --left-right --count ${branch}...${upstream} 2>/dev/null`.text();
-    const parts = revList.trim().split(/\s+/);
-    if (parts.length === 2) {
-      ahead = parseInt(parts[0], 10) || 0;
-      behind = parseInt(parts[1], 10) || 0;
-    }
   } catch {
-    // No remote tracking branch yet
+    // No upstream configured
+  }
+  if (upstream) {
+    try {
+      // Only mark tracking as present if upstream comparison succeeds.
+      const revList =
+        await $`git -C ${repoPath} rev-list --left-right --count ${branch}...${upstream} 2>/dev/null`.text();
+      const parts = revList.trim().split(/\s+/);
+      if (parts.length === 2) {
+        hasTrackingBranch = true;
+        ahead = parseInt(parts[0], 10) || 0;
+        behind = parseInt(parts[1], 10) || 0;
+      }
+    } catch {
+      // Upstream is configured but no longer resolves (e.g. remote branch deleted).
+    }
   }
 
   try {
     // Behind main
+    const main = await getMainBranch(repoPath);
     const behindMainResult =
-      await $`git -C ${repoPath} rev-list --count HEAD..origin/main 2>/dev/null`.text();
+      await $`git -C ${repoPath} rev-list --count HEAD..origin/${main} 2>/dev/null`.text();
     behindMain = parseInt(behindMainResult.trim(), 10) || 0;
   } catch {
-    // No origin/main
+    // No origin/<main>
   }
 
   try {
@@ -354,8 +361,7 @@ export function formatGitStatus(status: GitStatus): string {
 }
 
 export async function fetchLatestMain(repoPath: string): Promise<void> {
-  const main = await getMainBranch(repoPath);
-  await $`git -C ${repoPath} fetch origin ${main}`.quiet().nothrow();
+  await $`git -C ${repoPath} fetch --prune origin`.quiet().nothrow();
 }
 
 /**
