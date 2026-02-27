@@ -149,7 +149,7 @@ export function HotkeyHints() {
   } else if (view === "prComments") {
     hints.push("↑↓ Navigate", "Space Select/Deselect");
     if (prCommentsHasSelection) {
-      hints.push("p Paste Selected");
+      hints.push("⏎ Send Selected");
     }
     if (prCommentsSelectionKind === "thread") {
       hints.push("s Resolve");

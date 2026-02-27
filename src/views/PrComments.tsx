@@ -26,7 +26,7 @@ function truncateDetailLog(
   let text = truncated ? lines.slice(0, maxLines).join("\n") : log;
 
   if (truncated) {
-    text = `${text}\n\n[Output truncated in UI. Select with Space, then press p to paste full output.]`;
+    text = `${text}\n\n[Output truncated in UI. Select with Space, then press Enter to send full output.]`;
   }
 
   return { text, truncated };
@@ -275,7 +275,7 @@ export function PrComments() {
       return;
     }
 
-    if (input === "p" && activeTask && selectedIssueKeys.size > 0) {
+    if (key.return && activeTask && selectedIssueKeys.size > 0) {
       const parts: string[] = [];
       const selectedItems = issueItems.filter((item) =>
         selectedIssueKeys.has(item.key),
