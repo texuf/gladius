@@ -15,6 +15,7 @@ import { EmbeddedTerminal, getCwd } from "../components/EmbeddedTerminal.js";
 import { destroySession } from "../services/terminalManager.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import type { Repo } from "../store/types.js";
+import { deleteWorktree } from "../services/worktree.js";
 import { homedir } from "os";
 import { $ } from "bun";
 
@@ -49,6 +50,7 @@ export function RepoSelection() {
   );
   const [projectEditValue, setProjectEditValue] = useState("");
   const [projectEditError, setProjectEditError] = useState("");
+  const [deletingRepoId, setDeletingRepoId] = useState<string | null>(null);
 
   const [addRepoPhase, setAddRepoPhase] = useState<AddRepoPhase>(null);
   const [capturedPath, setCapturedPath] = useState("");
@@ -64,7 +66,7 @@ export function RepoSelection() {
 
   const existingProjects = [...new Set(repos.map((r) => r.project_name))].sort();
 
-  function reloadRepos() {
+  function reloadRepos(): Repo[] {
     const updated = getAllRepos();
     setRepos(updated);
     const counts: Record<string, number> = {};
@@ -76,6 +78,7 @@ export function RepoSelection() {
     }
     setTaskCounts(counts);
     setRepoTaskIds(taskIds);
+    return updated;
   }
 
   useEffect(() => {
@@ -192,15 +195,71 @@ export function RepoSelection() {
 
   const handleConfirmDelete = () => {
     if (!confirmDelete) return;
-    deleteRepo(confirmDelete.id);
-    const updated = getAllRepos();
-    setRepos(updated);
-    setSelectedIndex(Math.min(selectedIndex, updated.length - 1));
+    const repo = confirmDelete;
     setConfirmDelete(null);
-    reloadRepos();
+    setDeletingRepoId(repo.id);
+
+    void (async () => {
+      try {
+        const repoTasks = getTasksForRepo(repo.id);
+
+        for (const task of repoTasks) {
+          destroySession(`${task.id}-terminal`);
+          destroySession(`${task.id}-console`);
+          destroySession(task.id);
+        }
+
+        for (const task of repoTasks) {
+          if (!task.worktree_path) continue;
+          await deleteWorktree(repo.path, task.worktree_path, task.branch_name);
+        }
+
+        const deletedTaskIds = new Set(repoTasks.map((t) => t.id));
+        deleteRepo(repo.id);
+
+        const state = useStore.getState();
+        if (state.activeRepo?.id === repo.id) {
+          state.setActiveRepo(null);
+          state.setTasks([]);
+        }
+
+        useStore.setState((prev) => {
+          const gitStatuses = { ...prev.gitStatuses };
+          const taskStatuses = { ...prev.taskStatuses };
+          for (const taskId of deletedTaskIds) {
+            delete gitStatuses[taskId];
+            delete taskStatuses[taskId];
+          }
+          return {
+            ...prev,
+            gitStatuses,
+            taskStatuses,
+            consoleInteractedTasks: new Set(
+              [...prev.consoleInteractedTasks].filter(
+                (taskId) => !deletedTaskIds.has(taskId),
+              ),
+            ),
+            clearedPrTasks: new Set(
+              [...prev.clearedPrTasks].filter(
+                (taskId) => !deletedTaskIds.has(taskId),
+              ),
+            ),
+          };
+        });
+
+        const updated = reloadRepos();
+        setSelectedIndex(Math.min(selectedIndex, Math.max(0, updated.length - 1)));
+      } catch (e: any) {
+        setError(e.message || "Failed to delete repo");
+      } finally {
+        setDeletingRepoId(null);
+      }
+    })();
   };
 
   useInput((input, key) => {
+    if (deletingRepoId) return;
+
     if (addRepoPhase === "navigate") return;
 
     if (addRepoPhase === "method-select") {
@@ -376,6 +435,7 @@ export function RepoSelection() {
       {repos.map((repo, i) => {
         const previous = i > 0 ? repos[i - 1] : null;
         const showProjectHeader = !previous || previous.project_name !== repo.project_name;
+        const isDeleting = deletingRepoId === repo.id;
         const dots = { green: 0, red: 0, orange: 0, yellow: 0, purple: 0 };
         for (const tid of repoTaskIds[repo.id] || []) {
           const c = taskStatuses[tid];
@@ -403,6 +463,7 @@ export function RepoSelection() {
                   {i === selectedIndex ? "▸ " : "  "}
                   {repo.name}
                 </Text>
+                {isDeleting && <Text color="yellow"> [deleting...]</Text>}
                 <Text dimColor>
                   {"  "}
                   {taskCounts[repo.id] || 0} task
@@ -417,7 +478,7 @@ export function RepoSelection() {
 
       {confirmDelete && (
         <ConfirmModal
-          message={`Delete repo "${confirmDelete.name}"?`}
+          message={`Delete repo "${confirmDelete.name}" and all of its tasks/worktrees?`}
           onConfirm={handleConfirmDelete}
           onCancel={() => setConfirmDelete(null)}
         />

@@ -578,6 +578,12 @@ export function deleteRepo(id: string): void {
     .query("SELECT project_id FROM repos WHERE id = ?")
     .get(id) as { project_id: string } | null;
 
+  // Remove tasks and events tied to this repo.
+  db.query(
+    "DELETE FROM task_events WHERE task_id IN (SELECT id FROM tasks WHERE repo_id = ?)",
+  ).run(id);
+  db.query("DELETE FROM tasks WHERE repo_id = ?").run(id);
+
   db.query("DELETE FROM repos WHERE id = ?").run(id);
 
   if (row?.project_id) {
