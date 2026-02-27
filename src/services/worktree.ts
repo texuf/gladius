@@ -38,8 +38,8 @@ export async function createWorktree(
     await $`git -C ${projectPath} worktree add ${worktreePath} -b ${branchName} origin/${mainBranch}`;
   }
 
-  // Copy .env files
-  copyEnvFiles(projectPath, worktreePath);
+  // Copy .env files that are gitignored (secrets only, not tracked .env.example etc.)
+  await copyIgnoredEnvFiles(projectPath, worktreePath);
 
   return worktreePath;
 }
@@ -72,23 +72,35 @@ export async function deleteWorktree(
 }
 
 /**
- * Recursively find and copy .env* files from source to destination,
- * maintaining relative paths.
+ * Copy .env* files that are gitignored from source to destination,
+ * maintaining relative paths. Tracked files (e.g. .env.example) are skipped.
  */
-function copyEnvFiles(src: string, dest: string) {
+async function copyIgnoredEnvFiles(src: string, dest: string) {
   const files = findEnvFiles(src);
-  for (const file of files) {
-    const relativePath = file.slice(src.length);
-    const destPath = join(dest, relativePath);
-    const destDir = destPath.slice(0, destPath.lastIndexOf("/"));
-    if (!existsSync(destDir)) {
-      mkdirSync(destDir, { recursive: true });
+  if (files.length === 0) return;
+
+  // Ask git which of these files are ignored
+  const relativePaths = files.map((f) => f.slice(src.length + 1));
+  try {
+    const result = await $`git -C ${src} check-ignore ${relativePaths}`.quiet().nothrow().text();
+    const ignored = new Set(result.trim().split("\n").filter(Boolean));
+
+    for (const rel of relativePaths) {
+      if (!ignored.has(rel)) continue;
+      const srcPath = join(src, rel);
+      const destPath = join(dest, rel);
+      const destDir = destPath.slice(0, destPath.lastIndexOf("/"));
+      if (!existsSync(destDir)) {
+        mkdirSync(destDir, { recursive: true });
+      }
+      try {
+        copyFileSync(srcPath, destPath);
+      } catch {
+        // Skip files we can't copy
+      }
     }
-    try {
-      copyFileSync(file, destPath);
-    } catch {
-      // Skip files we can't copy
-    }
+  } catch {
+    // If git check-ignore fails, skip copying entirely
   }
 }
 
