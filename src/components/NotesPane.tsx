@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text } from "ink";
 import InkTextInput from "ink-text-input";
 import { useStore } from "../store/index.js";
 import { updateTask } from "../services/db.js";
@@ -59,7 +59,7 @@ export function NotesPane() {
       paddingX={1}
       width="100%"
     >
-      <Text bold color="cyan" wrap="wrap">
+      <Text bold color="yellow" wrap="wrap">
         {(activeTask.description || "").toUpperCase()}
       </Text>
     </Box>
