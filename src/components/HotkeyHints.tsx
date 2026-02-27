@@ -93,9 +93,11 @@ export function HotkeyHints() {
         branch !== "main" &&
         branch !== "master" &&
         activeTask?.worktree_path;
+      const behindMain = activeTask && gitStatuses[activeTask.id]?.behindMain;
+      const rebaseHints = behindMain && behindMain > 0 && activeTask?.model ? ["gr Rebase"] : [];
       const towerHints = activeTask?.worktree_path ? ["b Tower"] : [];
       const cursorHints = activeTask?.worktree_path ? ["n Cursor"] : [];
-      const openPrHints = hasOpenPr ? ["m Open PR"] : [];
+      const openPrHints = hasOpenPr ? ["p View PR"] : [];
       const createPrHints = canCreatePr ? ["p Create PR"] : [];
       const clearPrHints = isMerged ? ["p Clear PR"] : [];
       const prHints = hasIssues ? ["v PR Issues"] : [];
@@ -109,6 +111,7 @@ export function HotkeyHints() {
         ...openPrHints,
         ...createPrHints,
         ...clearPrHints,
+        ...rebaseHints,
         ...prHints,
         ...mergeHints,
         "y Copy",

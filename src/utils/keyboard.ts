@@ -43,7 +43,7 @@ export function processChord(
     const newBuffer = buffer + input;
 
     // Check for known chords
-    if (newBuffer === "cl" || newBuffer === "co") {
+    if (newBuffer === "cl" || newBuffer === "co" || newBuffer === "gr") {
       return { newBuffer: "", chord: newBuffer };
     }
 

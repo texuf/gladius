@@ -7,7 +7,6 @@ import { TerminalPane } from "../components/TerminalPane.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { processChord } from "../utils/keyboard.js";
 import {
-  formatGitStatus,
   formatPrStatus,
   getGitStatus,
   getGitStatusWithPr,
@@ -279,12 +278,14 @@ export function TaskView() {
       return;
     }
 
-    // Create PR / Clear merged PR
+    // Create PR / View PR / Clear merged PR
     if (input === "p" && !key.super && activeTask?.worktree_path) {
       const pr = gitStatuses[activeTask.id]?.pr;
       const currentBranch = gitStatuses[activeTask.id]?.branch;
       if (currentBranch === "main" || currentBranch === "master") return;
-      if (pr && pr.state === "merged") {
+      if (pr && pr.state === "open") {
+        void handleOpenPrInBrowser();
+      } else if (pr && pr.state === "merged") {
         // Mark PR as cleared so polling doesn't bring it back
         useStore.getState().markPrCleared(activeTask.id);
         useStore.getState().setTaskStatuses({
@@ -294,12 +295,6 @@ export function TaskView() {
       } else if (!pr) {
         setView("createPr");
       }
-      return;
-    }
-
-    // Open PR in browser
-    if (input === "m" && !key.super && !key.ctrl && activeTask?.worktree_path) {
-      void handleOpenPrInBrowser();
       return;
     }
 
@@ -321,14 +316,18 @@ export function TaskView() {
       return;
     }
 
-    // Chord handling for model selection
-    if (!activeTask?.model) {
+    // Chord handling
+    {
       const { newBuffer, chord } = processChord(chordBuffer, input, key);
       setChordBuffer(newBuffer);
 
-      if (chord === "cl" || chord === "co") {
+      if ((chord === "cl" || chord === "co") && !activeTask?.model) {
         const model = chord === "cl" ? "claude" : "codex";
         selectModel(model);
+      }
+
+      if (chord === "gr" && activeTask?.worktree_path && activeTask?.model) {
+        void handleRebase();
       }
     }
   });
@@ -386,6 +385,15 @@ export function TaskView() {
         cwd: activeTask.worktree_path,
         stdio: ["ignore", "ignore", "ignore"],
       });
+    } catch {}
+  };
+
+  const handleRebase = async () => {
+    if (!activeTask?.worktree_path) return;
+    const sessionName = `gladius-${activeTask.id}-console`;
+    const prompt = "Please rebase this branch onto main and resolve any conflicts. Run: git fetch origin main && git rebase origin/main. If there are conflicts, resolve them and continue the rebase.";
+    try {
+      await $`tmux -L gladius send-keys -t ${sessionName} ${prompt} Enter`;
     } catch {}
   };
 
@@ -450,7 +458,24 @@ export function TaskView() {
             <Text dimColor> Fetching...</Text>
           ) : (
             <>
-              {gitStatus && <Text color="cyan"> {formatGitStatus(gitStatus)}</Text>}
+              {gitStatus && (
+                <>
+                  <Text color="cyan"> {gitStatus.branch}</Text>
+                  {(gitStatus.ahead > 0 || gitStatus.behind > 0) && (
+                    <Text color="cyan">
+                      {" ("}
+                      {gitStatus.ahead > 0 && <Text color="yellow">+{gitStatus.ahead}</Text>}
+                      {gitStatus.ahead > 0 && gitStatus.behind > 0 && "/"}
+                      {gitStatus.behind > 0 && <Text color="yellow">-{gitStatus.behind}</Text>}
+                      {")"}
+                    </Text>
+                  )}
+                  {gitStatus.behindMain > 0 && <Text color="cyan"> [-{gitStatus.behindMain}]</Text>}
+                  {gitStatus.changedFiles > 0 && (
+                    <Text color="yellow"> {gitStatus.changedFiles} file{gitStatus.changedFiles !== 1 ? "s" : ""}</Text>
+                  )}
+                </>
+              )}
               {gitStatus?.pr && (
                 <Text
                   color={
