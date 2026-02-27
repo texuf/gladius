@@ -5,6 +5,7 @@ import type { AppState } from "./types.js";
 export const useStore = create<AppState>((set) => ({
   // Navigation
   view: "projects",
+  activeProject: null,
   activeRepo: null,
   activeTask: null,
   selectedIndex: 0,
@@ -35,9 +36,12 @@ export const useStore = create<AppState>((set) => ({
     setAppState("nav.view", view);
     set({ view, selectedIndex: 0 });
   },
+  setActiveProject: (activeProject) => {
+    setAppState("nav.project_id", activeProject?.id ?? null);
+    set({ activeProject });
+  },
   setActiveRepo: (activeRepo) => {
     setAppState("nav.repo_id", activeRepo?.id ?? null);
-    setAppState("nav.project_id", null);
     set({ activeRepo });
   },
   setActiveTask: (activeTask) => {

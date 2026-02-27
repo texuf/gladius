@@ -7,8 +7,9 @@ import {
   addRepo,
   deleteRepo,
   touchRepo,
-  updateRepoProject,
   getTasksForRepo,
+  getProjectById,
+  touchProject,
 } from "../services/db.js";
 import { StatusDots } from "../components/StatusDots.js";
 import { EmbeddedTerminal, getCwd } from "../components/EmbeddedTerminal.js";
@@ -34,6 +35,7 @@ export function RepoSelection() {
   const setRepos = useStore((s) => s.setRepos);
   const selectedIndex = useStore((s) => s.selectedIndex);
   const setSelectedIndex = useStore((s) => s.setSelectedIndex);
+  const setActiveProject = useStore((s) => s.setActiveProject);
   const setActiveRepo = useStore((s) => s.setActiveRepo);
   const setView = useStore((s) => s.setView);
   const addingRepo = useStore((s) => s.addingRepo);
@@ -45,11 +47,6 @@ export function RepoSelection() {
   const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
   const [repoTaskIds, setRepoTaskIds] = useState<Record<string, string[]>>({});
   const [confirmDelete, setConfirmDelete] = useState<Repo | null>(null);
-  const [editingProjectRepoId, setEditingProjectRepoId] = useState<string | null>(
-    null,
-  );
-  const [projectEditValue, setProjectEditValue] = useState("");
-  const [projectEditError, setProjectEditError] = useState("");
   const [deletingRepoId, setDeletingRepoId] = useState<string | null>(null);
 
   const [addRepoPhase, setAddRepoPhase] = useState<AddRepoPhase>(null);
@@ -168,30 +165,6 @@ export function RepoSelection() {
       setAddRepoPhase("clone-url");
     }
   }
-
-  const handleProjectEditSubmit = (value: string) => {
-    if (!editingProjectRepoId) return;
-    const normalized = value.trim();
-    if (!normalized) {
-      setProjectEditError("Project name cannot be empty.");
-      return;
-    }
-
-    try {
-      updateRepoProject(editingProjectRepoId, normalized);
-      const updated = getAllRepos();
-      const selectedRepoId = editingProjectRepoId;
-      setRepos(updated);
-      const nextIndex = updated.findIndex((r) => r.id === selectedRepoId);
-      setSelectedIndex(nextIndex === -1 ? 0 : nextIndex);
-      setEditingProjectRepoId(null);
-      setProjectEditValue("");
-      setProjectEditError("");
-      reloadRepos();
-    } catch (e: any) {
-      setProjectEditError(e.message || "Failed to update project.");
-    }
-  };
 
   const handleConfirmDelete = () => {
     if (!confirmDelete) return;
@@ -345,15 +318,6 @@ export function RepoSelection() {
       return;
     }
 
-    if (editingProjectRepoId) {
-      if (key.escape) {
-        setEditingProjectRepoId(null);
-        setProjectEditValue("");
-        setProjectEditError("");
-      }
-      return;
-    }
-
     if (confirmDelete) {
       return;
     }
@@ -383,9 +347,17 @@ export function RepoSelection() {
     } else if (input === "g" && repos.length > 0) {
       const repo = repos[selectedIndex];
       if (repo) {
-        setEditingProjectRepoId(repo.id);
-        setProjectEditValue(repo.project_name);
-        setProjectEditError("");
+        const project = getProjectById(repo.project_id);
+        if (project) {
+          setActiveRepo(null);
+          setTasks([]);
+          useStore.getState().setActiveTask(null);
+          touchProject(project.id);
+          setActiveProject(project);
+          setView("projectView");
+        } else {
+          setError("Project not found for selected repo.");
+        }
       }
     }
   });
@@ -684,35 +656,6 @@ export function RepoSelection() {
             <Text dimColor>
               {cloneProjectName}/{parseRepoName(cloneUrl)}
             </Text>
-          </Box>
-        </Box>
-      )}
-
-      {editingProjectRepoId && (
-        <Box
-          flexDirection="column"
-          marginTop={1}
-          borderStyle="single"
-          borderColor="yellow"
-          paddingX={1}
-          paddingY={1}
-        >
-          <Text bold color="yellow">Edit project</Text>
-          <Box marginTop={1}>
-            <Text>Project: </Text>
-            <InkTextInput
-              value={projectEditValue}
-              onChange={setProjectEditValue}
-              onSubmit={handleProjectEditSubmit}
-            />
-          </Box>
-          {projectEditError && (
-            <Box marginTop={1}>
-              <Text color="red">{projectEditError}</Text>
-            </Box>
-          )}
-          <Box marginTop={1}>
-            <Text dimColor>⏎ Save Esc Cancel</Text>
           </Box>
         </Box>
       )}

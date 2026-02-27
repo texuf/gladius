@@ -1,6 +1,7 @@
 export interface Project {
   id: string;
   name: string;
+  path: string;
   created_at: string;
   last_accessed_at: string;
 }
@@ -11,6 +12,7 @@ export interface Repo {
   path: string;
   project_id: string;
   project_name: string;
+  project_path: string;
   created_at: string;
   last_accessed_at: string;
 }
@@ -71,6 +73,7 @@ export interface Reviewer {
 
 export type ViewState =
   | "projects"
+  | "projectView"
   | "tasks"
   | "taskView"
   | "taskSwitcher"
@@ -112,6 +115,7 @@ export type ModalState =
 export interface AppState {
   // Navigation
   view: ViewState;
+  activeProject: Project | null;
   activeRepo: Repo | null;
   activeTask: Task | null;
   selectedIndex: number;
@@ -139,6 +143,7 @@ export interface AppState {
 
   // Actions
   setView: (view: ViewState) => void;
+  setActiveProject: (project: Project | null) => void;
   setActiveRepo: (repo: Repo | null) => void;
   setActiveTask: (task: Task | null) => void;
   setSelectedIndex: (index: number) => void;

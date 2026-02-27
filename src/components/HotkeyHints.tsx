@@ -49,11 +49,27 @@ export function HotkeyHints() {
       "↑↓ Navigate",
       "⏎ Select",
       "Ctrl+N New Repo",
-      "g Edit Project",
+      "g Project",
       "d Delete",
       "u Standup",
       "s Settings",
     );
+  } else if (view === "projectView") {
+    if (focusPane === "none") {
+      hints.push(
+        "i Title",
+        "t Terminal",
+        "c Console",
+        "cl Claude",
+        "co Codex",
+        "l/o Switch",
+        "r Refresh",
+        "Esc Back",
+      );
+    } else {
+      const escHint = focusPane === "terminal" ? "Esc×2" : "Esc";
+      hints.push(`${escHint} Unfocus (${focusPane})`);
+    }
   } else if (view === "tasks") {
     hints.push(
       "↑↓ Navigate",

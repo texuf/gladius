@@ -3,10 +3,12 @@ import { Box, Text, useInput, useApp } from "ink";
 import { useStore } from "./store/index.js";
 import {
   getAppState,
+  getProjectById,
   getRepoById,
   getTasksForRepo,
 } from "./services/db.js";
 import { RepoSelection } from "./views/RepoSelection.js";
+import { ProjectView } from "./views/ProjectView.js";
 import { TaskList } from "./views/TaskList.js";
 import { TaskView } from "./views/TaskView.js";
 import { TaskSwitcher } from "./views/TaskSwitcher.js";
@@ -30,61 +32,86 @@ export function App() {
 
   const resolveRestoredView = (
     savedView: ViewState | null,
-    hasProject: boolean,
+    hasActiveProject: boolean,
+    hasActiveRepo: boolean,
     hasTask: boolean,
   ): ViewState => {
-    const preferred = savedView ?? (hasProject ? "tasks" : "projects");
+    const preferred = savedView ??
+      (hasActiveRepo ? "tasks" : hasActiveProject ? "projectView" : "projects");
 
     switch (preferred) {
       case "projects":
+      case "projectView":
       case "settings":
       case "taskSwitcher":
       case "standup":
+        if (preferred === "projectView") {
+          return hasActiveProject ? "projectView" : "projects";
+        }
         return preferred;
       case "tasks":
-        return hasProject ? "tasks" : "projects";
+        return hasActiveRepo
+          ? "tasks"
+          : hasActiveProject
+            ? "projectView"
+            : "projects";
       case "taskView":
       case "prComments":
       case "createPr":
         if (hasTask) return preferred;
-        return hasProject ? "tasks" : "projects";
+        return hasActiveRepo
+          ? "tasks"
+          : hasActiveProject
+            ? "projectView"
+            : "projects";
       default:
-        return hasProject ? "tasks" : "projects";
+        return hasActiveRepo
+          ? "tasks"
+          : hasActiveProject
+            ? "projectView"
+            : "projects";
     }
   };
 
   // Restore navigation breadcrumb on startup
   useEffect(() => {
     const savedView = getAppState("nav.view") as ViewState | null;
+    const savedProjectId = getAppState("nav.project_id");
     const savedRepoId = getAppState("nav.repo_id");
     const savedTaskId = getAppState("nav.task_id");
 
-    if (!savedRepoId) {
-      useStore.getState().setView(resolveRestoredView(savedView, false, false));
-      return;
-    }
-
-    const repo = getRepoById(savedRepoId);
-    if (!repo) {
-      useStore.getState().setView(resolveRestoredView(savedView, false, false));
-      return;
-    }
-
-    useStore.getState().setActiveRepo(repo);
-    const tasks = getTasksForRepo(repo.id);
-    useStore.getState().setTasks(tasks);
-
-    if (savedTaskId) {
-      const task = tasks.find(
-        (t) => t.id === savedTaskId && t.status === "active",
-      );
-      if (task) {
-        useStore.getState().setActiveTask(task);
+    if (savedProjectId) {
+      const project = getProjectById(savedProjectId);
+      if (project) {
+        useStore.getState().setActiveProject(project);
       }
     }
 
-    const hasTask = !!useStore.getState().activeTask;
-    useStore.getState().setView(resolveRestoredView(savedView, true, hasTask));
+    if (savedRepoId) {
+      const repo = getRepoById(savedRepoId);
+      if (repo) {
+        useStore.getState().setActiveRepo(repo);
+        const tasks = getTasksForRepo(repo.id);
+        useStore.getState().setTasks(tasks);
+
+        if (savedTaskId) {
+          const task = tasks.find(
+            (t) => t.id === savedTaskId && t.status === "active",
+          );
+          if (task) {
+            useStore.getState().setActiveTask(task);
+          }
+        }
+      }
+    }
+
+    const state = useStore.getState();
+    const hasTask = !!state.activeTask;
+    const hasActiveRepo = !!state.activeRepo;
+    const hasActiveProject = !!state.activeProject;
+    useStore.getState().setView(
+      resolveRestoredView(savedView, hasActiveProject, hasActiveRepo, hasTask),
+    );
   }, []);
 
   // Poll task statuses globally (LLM activity + PR status)
@@ -134,7 +161,7 @@ export function App() {
     if (input === "n" && mod) {
       if (view === "projects") {
         useStore.getState().setAddingRepo(true);
-      } else if (activeRepo) {
+      } else if ((view === "tasks" || view === "taskView") && activeRepo) {
         setModal({ type: "newTask" });
       }
       return;
@@ -162,6 +189,8 @@ export function App() {
     switch (view) {
       case "projects":
         return <RepoSelection />;
+      case "projectView":
+        return <ProjectView />;
       case "tasks":
         return <TaskList />;
       case "taskView":

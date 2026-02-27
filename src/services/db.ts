@@ -1,8 +1,8 @@
 import { Database } from "bun:sqlite";
 import { v4 as uuid } from "uuid";
 import { homedir } from "os";
-import { mkdirSync, existsSync } from "fs";
-import { join } from "path";
+import { mkdirSync, existsSync, readdirSync } from "fs";
+import { dirname, join, resolve } from "path";
 import type { Project, Repo, Task, TaskEvent } from "../store/types.js";
 
 const GLADIUS_DIR = join(homedir(), ".gladius");
@@ -87,6 +87,23 @@ function hasColumn(tableName: string, columnName: string): boolean {
   return columns.some((column) => column.name === columnName);
 }
 
+function uniqueProjectName(baseName: string, taken: Set<string>): string {
+  const base = baseName.trim() || "default";
+  if (!taken.has(base)) {
+    taken.add(base);
+    return base;
+  }
+
+  let index = 2;
+  let candidate = `${base}-${index}`;
+  while (taken.has(candidate)) {
+    index += 1;
+    candidate = `${base}-${index}`;
+  }
+  taken.add(candidate);
+  return candidate;
+}
+
 function migrateLegacyProjectModel(): void {
   const hasLegacyProjectsTable = hasTable("projects") && hasColumn("projects", "path");
   const hasLegacyTasksProjectId = hasTable("tasks") && hasColumn("tasks", "project_id");
@@ -122,18 +139,25 @@ function migrateLegacyProjectModel(): void {
     last_accessed_at: string;
   }>;
 
-  const projectIdByName = new Map<string, string>();
+  const projectIdByPath = new Map<string, string>();
   const projectRows: Project[] = [];
+  const takenProjectNames = new Set<string>();
 
   for (const repo of legacyRepos) {
-    const projectName = repo.group_name?.trim() || deriveProjectName(repo.path);
-    if (projectIdByName.has(projectName)) continue;
+    const projectPath = deriveProjectPath(repo.path);
+    if (projectIdByPath.has(projectPath)) continue;
+
+    const projectName = uniqueProjectName(
+      repo.group_name?.trim() || deriveProjectName(projectPath),
+      takenProjectNames,
+    );
 
     const id = uuid();
-    projectIdByName.set(projectName, id);
+    projectIdByPath.set(projectPath, id);
     projectRows.push({
       id,
       name: projectName,
+      path: projectPath,
       created_at: repo.created_at,
       last_accessed_at: repo.last_accessed_at,
     });
@@ -141,13 +165,15 @@ function migrateLegacyProjectModel(): void {
 
   if (projectRows.length === 0) {
     const now = new Date().toISOString();
+    const fallbackPath = join(homedir(), "default");
     projectRows.push({
       id: uuid(),
       name: "default",
+      path: fallbackPath,
       created_at: now,
       last_accessed_at: now,
     });
-    projectIdByName.set("default", projectRows[0].id);
+    projectIdByPath.set(fallbackPath, projectRows[0].id);
   }
 
   db.exec("PRAGMA foreign_keys = OFF;");
@@ -157,6 +183,7 @@ function migrateLegacyProjectModel(): void {
       CREATE TABLE IF NOT EXISTS projects_new (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
+        path TEXT NOT NULL UNIQUE,
         created_at TEXT NOT NULL,
         last_accessed_at TEXT NOT NULL
       );
@@ -190,12 +217,13 @@ function migrateLegacyProjectModel(): void {
     `);
 
     const insertProject = db.query(
-      "INSERT INTO projects_new (id, name, created_at, last_accessed_at) VALUES (?, ?, ?, ?)",
+      "INSERT INTO projects_new (id, name, path, created_at, last_accessed_at) VALUES (?, ?, ?, ?, ?)",
     );
     for (const project of projectRows) {
       insertProject.run(
         project.id,
         project.name,
+        project.path,
         project.created_at,
         project.last_accessed_at,
       );
@@ -205,9 +233,9 @@ function migrateLegacyProjectModel(): void {
       "INSERT INTO repos (id, name, path, project_id, created_at, last_accessed_at) VALUES (?, ?, ?, ?, ?, ?)",
     );
     for (const repo of legacyRepos) {
-      const projectName = repo.group_name?.trim() || deriveProjectName(repo.path);
+      const projectPath = deriveProjectPath(repo.path);
       const projectId =
-        projectIdByName.get(projectName) ||
+        projectIdByPath.get(projectPath) ||
         projectRows[0].id;
       insertRepo.run(
         repo.id,
@@ -257,6 +285,7 @@ function migrateSchema() {
       CREATE TABLE projects (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
+        path TEXT NOT NULL UNIQUE,
         created_at TEXT NOT NULL,
         last_accessed_at TEXT NOT NULL
       );
@@ -275,6 +304,60 @@ function migrateSchema() {
       );
     `);
   }
+
+  if (!hasColumn("projects", "path")) {
+    db.exec("ALTER TABLE projects ADD COLUMN path TEXT;");
+  }
+
+  const projectsMissingPath = db
+    .query(
+      "SELECT id, name FROM projects WHERE path IS NULL OR TRIM(path) = '' ORDER BY created_at ASC",
+    )
+    .all() as Array<{ id: string; name: string }>;
+  if (projectsMissingPath.length > 0) {
+    const repoRows = db
+      .query("SELECT project_id, path FROM repos ORDER BY last_accessed_at DESC")
+      .all() as Array<{ project_id: string; path: string }>;
+    const projectPathFromRepos = new Map<string, string>();
+    for (const row of repoRows) {
+      if (!projectPathFromRepos.has(row.project_id)) {
+        projectPathFromRepos.set(row.project_id, deriveProjectPath(row.path));
+      }
+    }
+
+    const takenPaths = new Set(
+      (
+        db
+          .query(
+            "SELECT path FROM projects WHERE path IS NOT NULL AND TRIM(path) <> ''",
+          )
+          .all() as Array<{ path: string }>
+      ).map((row) => normalizePath(row.path)),
+    );
+
+    const updatePath = db.query("UPDATE projects SET path = ? WHERE id = ?");
+    for (const project of projectsMissingPath) {
+      const preferred =
+        projectPathFromRepos.get(project.id) ||
+        join(homedir(), project.name || "default");
+
+      let candidate = normalizePath(preferred);
+      if (takenPaths.has(candidate)) {
+        let index = 2;
+        let next = `${candidate}-${index}`;
+        while (takenPaths.has(next)) {
+          index += 1;
+          next = `${candidate}-${index}`;
+        }
+        candidate = next;
+      }
+      takenPaths.add(candidate);
+      updatePath.run(candidate, project.id);
+    }
+  }
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_path ON projects(path);",
+  );
 
   if (!hasTable("tasks")) {
     db.exec(`
@@ -375,17 +458,13 @@ function migrateSchema() {
     .query("SELECT id, path FROM repos WHERE project_id IS NULL OR project_id = ''")
     .all() as Array<{ id: string; path: string }>;
   if (orphaned.length > 0) {
-    const now = new Date().toISOString();
-    const defaultProjectId = uuid();
-    db.query(
-      "INSERT INTO projects (id, name, created_at, last_accessed_at) VALUES (?, ?, ?, ?)",
-    ).run(defaultProjectId, "default", now, now);
+    const defaultProject = resolveProjectByPath(join(homedir(), "default"), "default");
 
     const updateRepoProject = db.query(
       "UPDATE repos SET project_id = ? WHERE id = ?",
     );
     for (const repo of orphaned) {
-      updateRepoProject.run(defaultProjectId, repo.id);
+      updateRepoProject.run(defaultProject.id, repo.id);
     }
   }
 
@@ -397,12 +476,16 @@ function migrateSchema() {
     .query("SELECT value FROM app_state WHERE key = 'nav.project_id'")
     .get() as { value: string | null } | null;
   if ((!navRepo || !navRepo.value) && navProject?.value) {
-    db.query("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)").run(
-      "nav.repo_id",
-      navProject.value,
-    );
+    const repoExists = db
+      .query("SELECT id FROM repos WHERE id = ?")
+      .get(navProject.value) as { id: string } | null;
+    if (repoExists) {
+      db.query("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)").run(
+        "nav.repo_id",
+        navProject.value,
+      );
+    }
   }
-  db.query("DELETE FROM app_state WHERE key = 'nav.project_id'").run();
 
   const legacyReviewerRows = db
     .query("SELECT key, value FROM app_state WHERE key LIKE 'reviewers.project.%'")
@@ -422,29 +505,60 @@ function migrateSchema() {
   db.query("DELETE FROM app_state WHERE key LIKE 'reviewers.project.%'").run();
 }
 
+function resolveProjectByPath(projectPath: string, preferredName?: string): Project {
+  const db = getDb();
+  const normalizedPath = normalizePath(projectPath);
+
+  const existing = db
+    .query("SELECT * FROM projects WHERE path = ?")
+    .get(normalizedPath) as Project | null;
+  if (existing) {
+    return existing;
+  }
+
+  const rawName = (preferredName?.trim() || deriveProjectName(normalizedPath)).trim();
+  const normalizedName = rawName || "default";
+  let name = normalizedName;
+  let index = 2;
+  while (
+    db.query("SELECT id FROM projects WHERE name = ?").get(name) as
+      | { id: string }
+      | null
+  ) {
+    name = `${normalizedName}-${index}`;
+    index += 1;
+  }
+
+  const now = new Date().toISOString();
+  const project: Project = {
+    id: uuid(),
+    name,
+    path: normalizedPath,
+    created_at: now,
+    last_accessed_at: now,
+  };
+
+  db.query(
+    "INSERT INTO projects (id, name, path, created_at, last_accessed_at) VALUES (?, ?, ?, ?, ?)",
+  ).run(
+    project.id,
+    project.name,
+    project.path,
+    project.created_at,
+    project.last_accessed_at,
+  );
+
+  return project;
+}
+
 function resolveProjectByName(projectName: string): Project {
   const db = getDb();
   const normalized = projectName.trim();
   const existing = db
     .query("SELECT * FROM projects WHERE name = ?")
     .get(normalized) as Project | null;
-  if (existing) {
-    return existing;
-  }
-
-  const now = new Date().toISOString();
-  const project: Project = {
-    id: uuid(),
-    name: normalized,
-    created_at: now,
-    last_accessed_at: now,
-  };
-
-  db.query(
-    "INSERT INTO projects (id, name, created_at, last_accessed_at) VALUES (?, ?, ?, ?)",
-  ).run(project.id, project.name, project.created_at, project.last_accessed_at);
-
-  return project;
+  if (existing) return existing;
+  return resolveProjectByPath(join(homedir(), normalized), normalized);
 }
 
 function touchProjectInternal(id: string): void {
@@ -486,13 +600,39 @@ export function getAppStatesByPrefix(
     .all(`${prefix}%`) as Array<{ key: string; value: string | null }>;
 }
 
+// -- Project CRUD --
+
+export function getAllProjects(): Project[] {
+  const db = getDb();
+  return db
+    .query(
+      "SELECT id, name, path, created_at, last_accessed_at FROM projects ORDER BY last_accessed_at DESC, name ASC",
+    )
+    .all() as Project[];
+}
+
+export function getProjectById(id: string): Project | null {
+  const db = getDb();
+  return (
+    (db
+      .query(
+        "SELECT id, name, path, created_at, last_accessed_at FROM projects WHERE id = ?",
+      )
+      .get(id) as Project) ?? null
+  );
+}
+
+export function touchProject(id: string): void {
+  touchProjectInternal(id);
+}
+
 // -- Repo CRUD --
 
 export function getAllRepos(): Repo[] {
   const db = getDb();
   return db
     .query(
-      `SELECT r.id, r.name, r.path, r.project_id, p.name AS project_name,
+      `SELECT r.id, r.name, r.path, r.project_id, p.name AS project_name, p.path AS project_path,
               r.created_at, r.last_accessed_at
        FROM repos r
        JOIN projects p ON r.project_id = p.id
@@ -501,26 +641,42 @@ export function getAllRepos(): Repo[] {
     .all() as Repo[];
 }
 
-export function addRepo(path: string, projectName?: string): Repo {
-  if (!existsSync(path)) {
-    throw new Error(`Directory does not exist: ${path}`);
+export function addRepo(path: string, projectNameOrPath?: string): Repo {
+  const normalizedPath = normalizePath(path);
+
+  if (!existsSync(normalizedPath)) {
+    throw new Error(`Directory does not exist: ${normalizedPath}`);
   }
-  if (!existsSync(join(path, ".git"))) {
+  if (!existsSync(join(normalizedPath, ".git"))) {
     throw new Error("Not a git repository");
   }
 
   const db = getDb();
-  const name = path.replace(homedir(), "~").replace(/^~\//, "");
-  const normalizedProject = (projectName?.trim() || deriveProjectName(path)).trim();
-  const project = resolveProjectByName(normalizedProject);
+  const name = normalizedPath.replace(homedir(), "~").replace(/^~\//, "");
+  const projectHint = projectNameOrPath?.trim() || "";
+
+  const derivedProjectPath = deriveProjectPath(normalizedPath);
+  const projectPath = !projectHint
+    ? derivedProjectPath
+    : projectHint.startsWith("/") || projectHint.startsWith("~")
+      ? normalizePath(projectHint)
+      : deriveProjectName(derivedProjectPath).toLowerCase() ===
+          projectHint.toLowerCase()
+        ? derivedProjectPath
+        : normalizePath(join(homedir(), projectHint));
+  const project = resolveProjectByPath(
+    projectPath,
+    projectHint || deriveProjectName(projectPath),
+  );
   const now = new Date().toISOString();
 
   const repo: Repo = {
     id: uuid(),
     name,
-    path,
+    path: normalizedPath,
     project_id: project.id,
     project_name: project.name,
+    project_path: project.path,
     created_at: now,
     last_accessed_at: now,
   };
@@ -561,7 +717,7 @@ export function getRepoById(id: string): Repo | null {
   return (
     (db
       .query(
-        `SELECT r.id, r.name, r.path, r.project_id, p.name AS project_name,
+        `SELECT r.id, r.name, r.path, r.project_id, p.name AS project_name, p.path AS project_path,
                 r.created_at, r.last_accessed_at
          FROM repos r
          JOIN projects p ON r.project_id = p.id
@@ -625,18 +781,108 @@ export function updateRepoProject(repoId: string, projectName: string): void {
   }
 }
 
-function deriveProjectName(repoPath: string): string {
-  const home = homedir();
-  let normalized = repoPath.trim();
-
-  if (normalized.startsWith(home + "/")) {
-    normalized = normalized.slice(home.length + 1);
-  } else if (normalized === home) {
-    normalized = "";
+export function refreshProjectRepos(projectId: string): {
+  discovered: number;
+  added: number;
+  reassigned: number;
+} {
+  const db = getDb();
+  const project = getProjectById(projectId);
+  if (!project) {
+    throw new Error("Project not found");
+  }
+  if (!existsSync(project.path)) {
+    throw new Error(`Project path does not exist: ${project.path}`);
   }
 
+  const now = new Date().toISOString();
+  const discoveredPaths = discoverGitRepos(project.path);
+  const getRepoByPath = db.query(
+    "SELECT id, project_id FROM repos WHERE path = ?",
+  );
+  const insertRepo = db.query(
+    "INSERT INTO repos (id, name, path, project_id, created_at, last_accessed_at) VALUES (?, ?, ?, ?, ?, ?)",
+  );
+  const reassignRepo = db.query(
+    "UPDATE repos SET project_id = ?, last_accessed_at = ? WHERE id = ?",
+  );
+
+  let added = 0;
+  let reassigned = 0;
+
+  for (const repoPath of discoveredPaths) {
+    const existing = getRepoByPath.get(repoPath) as
+      | { id: string; project_id: string }
+      | null;
+    if (!existing) {
+      const name = repoPath.replace(homedir(), "~").replace(/^~\//, "");
+      insertRepo.run(uuid(), name, repoPath, projectId, now, now);
+      added += 1;
+      continue;
+    }
+    if (existing.project_id !== projectId) {
+      reassignRepo.run(projectId, now, existing.id);
+      reassigned += 1;
+    }
+  }
+
+  touchProjectInternal(projectId);
+  return { discovered: discoveredPaths.length, added, reassigned };
+}
+
+function normalizePath(pathValue: string): string {
+  const home = homedir();
+  const expanded = pathValue.trim().replace(/^~(?=$|[\\/])/, home);
+  return resolve(expanded || home);
+}
+
+function deriveProjectPath(repoPath: string): string {
+  return dirname(normalizePath(repoPath));
+}
+
+function deriveProjectName(projectPath: string): string {
+  const normalized = normalizePath(projectPath);
   const segments = normalized.split(/[\\/]+/).filter(Boolean);
-  return segments[0] || "default";
+  return segments[segments.length - 1] || "default";
+}
+
+function discoverGitRepos(projectPath: string): string[] {
+  const root = normalizePath(projectPath);
+  const repos = new Set<string>();
+  const stack: Array<{ dir: string; depth: number }> = [{ dir: root, depth: 0 }];
+  const maxDepth = 4;
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (existsSync(join(current.dir, ".git"))) {
+      repos.add(current.dir);
+      continue;
+    }
+    if (current.depth >= maxDepth) continue;
+
+    let entries:
+      | Array<{ name: string; isDirectory: () => boolean; isSymbolicLink: () => boolean }>
+      | null = null;
+    try {
+      entries = readdirSync(current.dir, { withFileTypes: true }) as Array<{
+        name: string;
+        isDirectory: () => boolean;
+        isSymbolicLink: () => boolean;
+      }>;
+    } catch {
+      entries = null;
+    }
+    if (!entries) continue;
+
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      if (entry.name === ".git" || entry.name === "node_modules") continue;
+      const child = join(current.dir, entry.name);
+      stack.push({ dir: child, depth: current.depth + 1 });
+    }
+  }
+
+  return [...repos].sort();
 }
 
 // -- Task CRUD --
