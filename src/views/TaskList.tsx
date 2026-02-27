@@ -2,7 +2,7 @@ import React, { useState, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
 import { useStore } from "../store/index.js";
 import {
-  getTasksForProject,
+  getTasksForRepo,
   closeTask as dbCloseTask,
   swapTaskOrder,
   touchTask,
@@ -20,7 +20,7 @@ import { StatusDots } from "../components/StatusDots.js";
 import type { Task } from "../store/types.js";
 
 export function TaskList() {
-  const activeProject = useStore((s) => s.activeProject);
+  const activeRepo = useStore((s) => s.activeRepo);
   const tasks = useStore((s) => s.tasks);
   const setTasks = useStore((s) => s.setTasks);
   const selectedIndex = useStore((s) => s.selectedIndex);
@@ -83,9 +83,9 @@ export function TaskList() {
         setSelectedIndex(selectedIndex + 1);
       }
     } else if (key.return && selectedTask?.status === "active") {
-      if (!activeProject) return;
+      if (!activeRepo) return;
       touchTask(selectedTask.id);
-      const refreshedTasks = getTasksForProject(activeProject.id);
+      const refreshedTasks = getTasksForRepo(activeRepo.id);
       setTasks(refreshedTasks);
       const refreshedTask =
         refreshedTasks.find((t) => t.id === selectedTask.id) ?? selectedTask;
@@ -105,11 +105,11 @@ export function TaskList() {
   });
 
   const reloadTasks = useCallback(() => {
-    if (activeProject) {
-      const updated = getTasksForProject(activeProject.id);
+    if (activeRepo) {
+      const updated = getTasksForRepo(activeRepo.id);
       setTasks(updated);
     }
-  }, [activeProject]);
+  }, [activeRepo]);
 
   const handleCloseTask = (task: Task) => {
     // Mark as closing immediately
@@ -122,9 +122,9 @@ export function TaskList() {
 
     // Run slow cleanup in background
     (async () => {
-      if (task.worktree_path && activeProject) {
+      if (task.worktree_path && activeRepo) {
         await deleteWorktree(
-          activeProject.path,
+          activeRepo.path,
           task.worktree_path,
           task.branch_name,
         );
@@ -135,10 +135,10 @@ export function TaskList() {
   };
 
   const handleReopenTask = async (task: Task) => {
-    if (!activeProject) return;
+    if (!activeRepo) return;
     setCreating(true);
     try {
-      const worktreePath = await createWorktree(activeProject.path, task.label);
+      const worktreePath = await createWorktree(activeRepo.path, task.label);
       dbReopenTask(task.id, worktreePath);
       reloadTasks();
       const reopened = {
@@ -157,7 +157,7 @@ export function TaskList() {
   };
 
   const handleCreateTask = async (description: string) => {
-    if (!description.trim() || !activeProject) return;
+    if (!description.trim() || !activeRepo) return;
 
     setCreating(true);
     try {
@@ -166,9 +166,9 @@ export function TaskList() {
       label = deduplicateLabel(label, existingLabels);
       const branchName = `${BRANCH_PREFIX}/${label}`;
 
-      const worktreePath = await createWorktree(activeProject.path, label);
+      const worktreePath = await createWorktree(activeRepo.path, label);
       const task = dbCreateTask(
-        activeProject.id,
+        activeRepo.id,
         label,
         description,
         branchName,
@@ -190,13 +190,13 @@ export function TaskList() {
     }
   };
 
-  if (!activeProject) return null;
+  if (!activeRepo) return null;
 
   return (
     <Box flexDirection="column" paddingX={1} flexGrow={1}>
       <Box marginBottom={1} justifyContent="space-between">
         <Text bold color="cyan">
-          {activeProject.name}
+          {activeRepo.name}
         </Text>
         {(() => {
           const dots = { green: 0, red: 0, orange: 0, yellow: 0, purple: 0 };

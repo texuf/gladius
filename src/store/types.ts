@@ -1,15 +1,23 @@
 export interface Project {
   id: string;
   name: string;
+  created_at: string;
+  last_accessed_at: string;
+}
+
+export interface Repo {
+  id: string;
+  name: string;
   path: string;
-  group_name: string;
+  project_id: string;
+  project_name: string;
   created_at: string;
   last_accessed_at: string;
 }
 
 export interface Task {
   id: string;
-  project_id: string;
+  repo_id: string;
   label: string;
   description: string;
   status: "active" | "closing" | "closed";
@@ -104,7 +112,7 @@ export type ModalState =
 export interface AppState {
   // Navigation
   view: ViewState;
-  activeProject: Project | null;
+  activeRepo: Repo | null;
   activeTask: Task | null;
   selectedIndex: number;
 
@@ -119,10 +127,10 @@ export interface AppState {
   copyMode: boolean;
 
   // Project Selection
-  addingProject: boolean;
+  addingRepo: boolean;
 
   // Cached data
-  projects: Project[];
+  repos: Repo[];
   tasks: Task[];
   gitStatuses: Record<string, GitStatus>;
   taskStatuses: Record<string, TaskStatusColor>;
@@ -131,7 +139,7 @@ export interface AppState {
 
   // Actions
   setView: (view: ViewState) => void;
-  setActiveProject: (project: Project | null) => void;
+  setActiveRepo: (repo: Repo | null) => void;
   setActiveTask: (task: Task | null) => void;
   setSelectedIndex: (index: number) => void;
   setModal: (modal: ModalState) => void;
@@ -140,8 +148,8 @@ export interface AppState {
   setPrCommentsHasSelection: (hasSelection: boolean) => void;
   setChordBuffer: (chord: string) => void;
   setCopyMode: (copyMode: boolean) => void;
-  setAddingProject: (adding: boolean) => void;
-  setProjects: (projects: Project[]) => void;
+  setAddingRepo: (adding: boolean) => void;
+  setRepos: (repos: Repo[]) => void;
   setTasks: (tasks: Task[]) => void;
   setGitStatus: (taskId: string, status: GitStatus) => void;
   setTaskStatuses: (statuses: Record<string, TaskStatusColor>) => void;

@@ -33,7 +33,7 @@ interface AddingReviewer {
 
 export function CreatePr() {
   const activeTask = useStore((s) => s.activeTask);
-  const activeProject = useStore((s) => s.activeProject);
+  const activeRepo = useStore((s) => s.activeRepo);
   const setView = useStore((s) => s.setView);
 
   const [phase, setPhase] = useState<Phase>("init");
@@ -76,9 +76,9 @@ export function CreatePr() {
         reviewers.sort((a, b) => a.name.localeCompare(b.name));
         setGlobalReviewers(reviewers);
 
-        // Load project defaults
-        const projectKey = `reviewers.project.${activeProject?.id}`;
-        const defaultJson = getAppState(projectKey);
+        // Load repo defaults
+        const repoKey = `reviewers.repo.${activeRepo?.id}`;
+        const defaultJson = getAppState(repoKey);
         const defaults: string[] = defaultJson ? JSON.parse(defaultJson) : [];
         setSelectedHandles(new Set(defaults));
 
@@ -140,8 +140,11 @@ export function CreatePr() {
       // Skip confirmation — go straight to creating the PR
       setPhase("creating");
       const reviewerList = Array.from(selectedHandles);
-      if (activeProject) {
-        setAppState(`reviewers.project.${activeProject.id}`, JSON.stringify(reviewerList));
+      if (activeRepo) {
+        setAppState(
+          `reviewers.repo.${activeRepo.id}`,
+          JSON.stringify(reviewerList),
+        );
       }
       const result = await createPullRequest(repoPath, title, description, reviewerList);
       setPrNumber(result.number);

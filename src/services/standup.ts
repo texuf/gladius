@@ -25,9 +25,9 @@ export interface StandupTaskData {
 }
 
 export interface StandupProjectData {
-  groupName: string;
   projectName: string;
-  projectPath: string;
+  repoName: string;
+  repoPath: string;
   mainCommits: string;
   mergedPrs: MergedPr[];
   tasks: StandupTaskData[];
@@ -44,46 +44,38 @@ export async function gatherStandupData(): Promise<StandupProjectData[]> {
   const tasks = getTasksActiveDuringWindow(sinceISO);
   const gitStatuses = useStore.getState().gitStatuses;
 
-  // Dedupe projects from the task list
-  const projectMap = new Map<
+  const repoMap = new Map<
     string,
     {
-      groupName: string;
       projectName: string;
-      projectPath: string;
+      repoName: string;
+      repoPath: string;
       tasks: typeof tasks;
     }
   >();
 
   for (const task of tasks) {
-    const key = `${task.group_name}::${task.project_name}`;
-    if (!projectMap.has(key)) {
-      projectMap.set(key, {
-        groupName: task.group_name,
+    const key = `${task.project_name}::${task.repo_name}`;
+    if (!repoMap.has(key)) {
+      repoMap.set(key, {
         projectName: task.project_name,
-        projectPath: task.project_path,
+        repoName: task.repo_name,
+        repoPath: task.repo_path,
         tasks: [],
       });
     }
-    projectMap.get(key)!.tasks.push(task);
+    repoMap.get(key)!.tasks.push(task);
   }
 
-  // Gather data per project in parallel
   const results = await Promise.all(
-    Array.from(projectMap.values()).map(async (project) => {
-      const mainBranch = await getMainBranch(project.projectPath);
+    Array.from(repoMap.values()).map(async (repo) => {
+      const mainBranch = await getMainBranch(repo.repoPath);
 
-      // Fetch main commits and merged PRs in parallel
       const [mainCommits, mergedPrs] = await Promise.all([
-        getCommitsSinceOnBranch(
-          project.projectPath,
-          mainBranch,
-          sinceISO,
-        ),
-        getMergedPrsSince(project.projectPath, sinceISO),
+        getCommitsSinceOnBranch(repo.repoPath, mainBranch, sinceISO),
+        getMergedPrsSince(repo.repoPath, sinceISO),
       ]);
 
-      // Build a map of merged PRs by branch for matching to tasks
       const prByBranch = new Map<string, MergedPr>();
       for (const pr of mergedPrs) {
         if (pr.headRefName) {
@@ -91,12 +83,11 @@ export async function gatherStandupData(): Promise<StandupProjectData[]> {
         }
       }
 
-      // Fetch per-task branch commits in parallel
       const taskDataList = await Promise.all(
-        project.tasks.map(async (task) => {
+        repo.tasks.map(async (task) => {
           const commits = task.branch_name
             ? await getCommitsSinceOnBranch(
-                project.projectPath,
+                repo.repoPath,
                 task.branch_name,
                 sinceISO,
               )
@@ -106,8 +97,7 @@ export async function gatherStandupData(): Promise<StandupProjectData[]> {
             ? prByBranch.get(task.branch_name) ?? null
             : null;
 
-          const cachedPr: PrStatus | null =
-            gitStatuses[task.id]?.pr ?? null;
+          const cachedPr: PrStatus | null = gitStatuses[task.id]?.pr ?? null;
           const prStatusStr = cachedPr ? formatPrStatus(cachedPr) : null;
 
           return {
@@ -123,9 +113,9 @@ export async function gatherStandupData(): Promise<StandupProjectData[]> {
       );
 
       return {
-        groupName: project.groupName,
-        projectName: project.projectName,
-        projectPath: project.projectPath,
+        projectName: repo.projectName,
+        repoName: repo.repoName,
+        repoPath: repo.repoPath,
         mainCommits,
         mergedPrs,
         tasks: taskDataList,
@@ -143,16 +133,16 @@ export function buildStandupPrompt(data: StandupProjectData[]): string {
 Time window: ${sinceISO} to now
 `;
 
-  for (const project of data) {
-    prompt += `\n=== ${project.groupName} / ${project.projectName} ===\n`;
+  for (const repo of data) {
+    prompt += `\n=== ${repo.projectName} / ${repo.repoName} ===\n`;
 
-    if (project.mainCommits) {
-      prompt += `\nRecent commits on main:\n${project.mainCommits}\n`;
+    if (repo.mainCommits) {
+      prompt += `\nRecent commits on main:\n${repo.mainCommits}\n`;
     }
 
-    if (project.mergedPrs.length > 0) {
+    if (repo.mergedPrs.length > 0) {
       prompt += `\nMerged PRs:\n`;
-      for (const pr of project.mergedPrs) {
+      for (const pr of repo.mergedPrs) {
         prompt += `PR #${pr.number} (${pr.headRefName}): ${pr.title}\n`;
         if (pr.body) {
           const truncated =
@@ -163,7 +153,7 @@ Time window: ${sinceISO} to now
     }
 
     prompt += `\nActive tasks:\n`;
-    for (const task of project.tasks) {
+    for (const task of repo.tasks) {
       prompt += `- ${task.taskLabel} [${task.taskStatus}]`;
       if (task.branchName) {
         prompt += ` branch: ${task.branchName}`;

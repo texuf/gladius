@@ -22,7 +22,7 @@ export function HotkeyHints() {
   const view = useStore((s) => s.view);
   const focusPane = useStore((s) => s.focusPane);
   const activeTask = useStore((s) => s.activeTask);
-  const addingProject = useStore((s) => s.addingProject);
+  const addingRepo = useStore((s) => s.addingRepo);
   const gitStatuses = useStore((s) => s.gitStatuses);
   const copyMode = useStore((s) => s.copyMode);
   const prCommentsSelectionKind = useStore((s) => s.prCommentsSelectionKind);
@@ -40,7 +40,7 @@ export function HotkeyHints() {
 
   if (view === "taskSwitcher") {
     hints.push("↑↓ Navigate", "⏎ Switch", "Esc Cancel");
-  } else if (view === "projects" && addingProject) {
+  } else if (view === "projects" && addingRepo) {
     hints.push("Esc Cancel");
   } else if (view === "settings") {
     hints.push("↑↓ Navigate", "⏎ Edit", "Esc Back");
@@ -48,8 +48,8 @@ export function HotkeyHints() {
     hints.push(
       "↑↓ Navigate",
       "⏎ Select",
-      "Ctrl+N New Project",
-      "g Edit Group",
+      "Ctrl+N New Repo",
+      "g Edit Project",
       "d Delete",
       "u Standup",
       "s Settings",

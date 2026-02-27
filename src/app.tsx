@@ -3,8 +3,8 @@ import { Box, Text, useInput, useApp } from "ink";
 import { useStore } from "./store/index.js";
 import {
   getAppState,
-  getProjectById,
-  getTasksForProject,
+  getRepoById,
+  getTasksForRepo,
 } from "./services/db.js";
 import { ProjectSelection } from "./views/ProjectSelection.js";
 import { TaskList } from "./views/TaskList.js";
@@ -25,8 +25,8 @@ export function App() {
   const modal = useStore((s) => s.modal);
   const setView = useStore((s) => s.setView);
   const setModal = useStore((s) => s.setModal);
-  const activeProject = useStore((s) => s.activeProject);
-  const addingProject = useStore((s) => s.addingProject);
+  const activeRepo = useStore((s) => s.activeRepo);
+  const addingRepo = useStore((s) => s.addingRepo);
 
   const resolveRestoredView = (
     savedView: ViewState | null,
@@ -56,22 +56,22 @@ export function App() {
   // Restore navigation breadcrumb on startup
   useEffect(() => {
     const savedView = getAppState("nav.view") as ViewState | null;
-    const savedProjectId = getAppState("nav.project_id");
+    const savedRepoId = getAppState("nav.repo_id");
     const savedTaskId = getAppState("nav.task_id");
 
-    if (!savedProjectId) {
+    if (!savedRepoId) {
       useStore.getState().setView(resolveRestoredView(savedView, false, false));
       return;
     }
 
-    const project = getProjectById(savedProjectId);
-    if (!project) {
+    const repo = getRepoById(savedRepoId);
+    if (!repo) {
       useStore.getState().setView(resolveRestoredView(savedView, false, false));
       return;
     }
 
-    useStore.getState().setActiveProject(project);
-    const tasks = getTasksForProject(project.id);
+    useStore.getState().setActiveRepo(repo);
+    const tasks = getTasksForRepo(repo.id);
     useStore.getState().setTasks(tasks);
 
     if (savedTaskId) {
@@ -109,7 +109,7 @@ export function App() {
     // Don't process global shortcuts if a modal is open, text input is active,
     // or a terminal/console pane is focused (only Esc handled there)
     const focusPane = useStore.getState().focusPane;
-    if (modal || addingProject || focusPane !== "none") return;
+    if (modal || addingRepo || focusPane !== "none") return;
 
     // Esc on task list -> Project Selection
     if (key.escape && view === "tasks") {
@@ -126,22 +126,22 @@ export function App() {
     // Cmd+Shift+N — Add new project (Kitty protocol terminals)
     if (input === "N" && key.super) {
       setView("projects");
-      useStore.getState().setAddingProject(true);
+      useStore.getState().setAddingRepo(true);
       return;
     }
 
     // Ctrl+N — Context-sensitive: add project (project view) or new task (task/taskView)
     if (input === "n" && mod) {
       if (view === "projects") {
-        useStore.getState().setAddingProject(true);
-      } else if (activeProject) {
+        useStore.getState().setAddingRepo(true);
+      } else if (activeRepo) {
         setModal({ type: "newTask" });
       }
       return;
     }
 
     // Cmd+P / Ctrl+P — Return to Task List
-    if (input === "p" && mod && activeProject) {
+    if (input === "p" && mod && activeRepo) {
       setView("tasks");
       return;
     }

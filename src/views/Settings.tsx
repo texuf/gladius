@@ -99,9 +99,9 @@ export function Settings() {
     setEditValue("");
   };
 
-  const migrateProjectReviewerDefaults = (oldHandle: string, newHandle: string) => {
+  const migrateRepoReviewerDefaults = (oldHandle: string, newHandle: string) => {
     if (oldHandle === newHandle) return;
-    const rows = getAppStatesByPrefix("reviewers.project.");
+    const rows = getAppStatesByPrefix("reviewers.repo.");
     for (const row of rows) {
       if (!row.value) continue;
       try {
@@ -154,7 +154,7 @@ export function Settings() {
     };
     setReviewers(next);
     setAppState("reviewers.global", JSON.stringify(next));
-    migrateProjectReviewerDefaults(prev.handle, normalized);
+    migrateRepoReviewerDefaults(prev.handle, normalized);
     setEditingReviewer(null);
     setEditValue("");
     setError("");

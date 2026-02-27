@@ -16,7 +16,7 @@ import { refreshAllTaskStatuses } from "../services/taskStatus.js";
 import {
   closeTask as dbCloseTask,
   updateTask,
-  getTasksForProject,
+  getTasksForRepo,
 } from "../services/db.js";
 import { deleteWorktree } from "../services/worktree.js";
 import { destroySession } from "../services/terminalManager.js";
@@ -24,7 +24,7 @@ import { StatusDots } from "../components/StatusDots.js";
 
 export function TaskView() {
   const activeTask = useStore((s) => s.activeTask);
-  const activeProject = useStore((s) => s.activeProject);
+  const activeRepo = useStore((s) => s.activeRepo);
   const focusPane = useStore((s) => s.focusPane);
   const setFocusPane = useStore((s) => s.setFocusPane);
   const chordBuffer = useStore((s) => s.chordBuffer);
@@ -415,7 +415,7 @@ export function TaskView() {
   };
 
   const handleCloseTask = () => {
-    if (!activeTask || !activeProject) return;
+    if (!activeTask || !activeRepo) return;
     // Mark as closing immediately and navigate away
     const closingTask = { ...activeTask, status: "closing" as const };
     setTasks(
@@ -433,13 +433,13 @@ export function TaskView() {
       destroySession(`${activeTask.id}-console`);
       if (activeTask.worktree_path) {
         await deleteWorktree(
-          activeProject.path,
+          activeRepo.path,
           activeTask.worktree_path,
           activeTask.branch_name,
         );
       }
       dbCloseTask(activeTask.id);
-      useStore.getState().setTasks(getTasksForProject(activeProject.id));
+      useStore.getState().setTasks(getTasksForRepo(activeRepo.id));
     })();
   };
 

@@ -2,62 +2,61 @@ import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import InkTextInput from "ink-text-input";
 import { useStore } from "../store/index.js";
-import { getAllActiveTasks, getTasksForProject, touchTask, touchProject } from "../services/db.js";
-import { getAllProjects } from "../services/db.js";
-import type { Task, Project } from "../store/types.js";
+import { getAllRepos, getTasksForRepo, touchTask, touchRepo } from "../services/db.js";
+import type { Task } from "../store/types.js";
 import { StatusDots } from "../components/StatusDots.js";
 
-interface TaskWithProject extends Task {
-  projectName: string;
-  projectId: string;
+interface TaskWithRepo extends Task {
+  repoName: string;
+  repoId: string;
 }
 
 export function TaskSwitcher() {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const activeProject = useStore((s) => s.activeProject);
-  const setActiveProject = useStore((s) => s.setActiveProject);
+  const activeRepo = useStore((s) => s.activeRepo);
+  const setActiveRepo = useStore((s) => s.setActiveRepo);
   const setActiveTask = useStore((s) => s.setActiveTask);
   const setView = useStore((s) => s.setView);
   const setTasks = useStore((s) => s.setTasks);
   const taskStatuses = useStore((s) => s.taskStatuses);
 
-  const [allTasks, setAllTasks] = useState<TaskWithProject[]>([]);
+  const [allTasks, setAllTasks] = useState<TaskWithRepo[]>([]);
 
   useEffect(() => {
-    const projects = getAllProjects();
-    const tasks: TaskWithProject[] = [];
+    const repos = getAllRepos();
+    const tasks: TaskWithRepo[] = [];
 
-    for (const project of projects) {
-      const projectTasks = getTasksForProject(project.id).filter(
-        (t) => t.status === "active"
-      );
-      for (const task of projectTasks) {
+    for (const repo of repos) {
+      const repoTasks = getTasksForRepo(repo.id).filter((t) => t.status === "active");
+      for (const task of repoTasks) {
         tasks.push({
           ...task,
-          projectName: project.name,
-          projectId: project.id,
+          repoName: repo.name,
+          repoId: repo.id,
         });
       }
     }
 
-    // Sort: current project first, then by last accessed
     tasks.sort((a, b) => {
-      if (activeProject) {
-        if (a.projectId === activeProject.id && b.projectId !== activeProject.id) return -1;
-        if (b.projectId === activeProject.id && a.projectId !== activeProject.id) return 1;
+      if (activeRepo) {
+        if (a.repoId === activeRepo.id && b.repoId !== activeRepo.id) return -1;
+        if (b.repoId === activeRepo.id && a.repoId !== activeRepo.id) return 1;
       }
-      return new Date(b.last_accessed_at).getTime() - new Date(a.last_accessed_at).getTime();
+      return (
+        new Date(b.last_accessed_at).getTime() -
+        new Date(a.last_accessed_at).getTime()
+      );
     });
 
     setAllTasks(tasks);
-  }, []);
+  }, [activeRepo?.id]);
 
   const filtered = query
     ? allTasks.filter(
         (t) =>
           t.label.toLowerCase().includes(query.toLowerCase()) ||
-          t.description.toLowerCase().includes(query.toLowerCase())
+          t.description.toLowerCase().includes(query.toLowerCase()),
       )
     : allTasks;
 
@@ -73,19 +72,18 @@ export function TaskSwitcher() {
       setSelectedIndex(Math.min(filtered.length - 1, selectedIndex + 1));
     } else if (key.return && filtered[selectedIndex]) {
       const task = filtered[selectedIndex];
-      // Switch to this task
       touchTask(task.id);
 
-      const projects = getAllProjects();
-      const project = projects.find((p) => p.id === task.projectId);
-      if (project) {
-        if (!activeProject || activeProject.id !== project.id) {
-          touchProject(project.id);
-          setActiveProject(project);
+      const repos = getAllRepos();
+      const repo = repos.find((r) => r.id === task.repoId);
+      if (repo) {
+        if (!activeRepo || activeRepo.id !== repo.id) {
+          touchRepo(repo.id);
+          setActiveRepo(repo);
         }
-        const projectTasks = getTasksForProject(project.id);
-        setTasks(projectTasks);
-        const freshTask = projectTasks.find((t) => t.id === task.id) ?? task;
+        const repoTasks = getTasksForRepo(repo.id);
+        setTasks(repoTasks);
+        const freshTask = repoTasks.find((t) => t.id === task.id) ?? task;
         setActiveTask(freshTask);
       } else {
         setActiveTask(task);
@@ -94,12 +92,11 @@ export function TaskSwitcher() {
     }
   });
 
-  // Group tasks by project
-  const currentProjectTasks = filtered.filter(
-    (t) => activeProject && t.projectId === activeProject.id
+  const currentRepoTasks = filtered.filter(
+    (t) => activeRepo && t.repoId === activeRepo.id,
   );
-  const otherProjectTasks = filtered.filter(
-    (t) => !activeProject || t.projectId !== activeProject.id
+  const otherRepoTasks = filtered.filter(
+    (t) => !activeRepo || t.repoId !== activeRepo.id,
   );
 
   let globalIdx = 0;
@@ -130,12 +127,10 @@ export function TaskSwitcher() {
         />
       </Box>
 
-      {currentProjectTasks.length > 0 && (
+      {currentRepoTasks.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
-          <Text dimColor>
-            Current Project: {activeProject?.name}
-          </Text>
-          {currentProjectTasks.map((task) => {
+          <Text dimColor>Current Repo: {activeRepo?.name}</Text>
+          {currentRepoTasks.map((task) => {
             const idx = globalIdx++;
             const taskColor = taskStatuses[task.id];
             return (
@@ -168,10 +163,10 @@ export function TaskSwitcher() {
         </Box>
       )}
 
-      {otherProjectTasks.length > 0 && (
+      {otherRepoTasks.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
-          <Text dimColor>Other Projects:</Text>
-          {otherProjectTasks.map((task) => {
+          <Text dimColor>Other Repos:</Text>
+          {otherRepoTasks.map((task) => {
             const idx = globalIdx++;
             const taskColor = taskStatuses[task.id];
             return (
@@ -192,7 +187,7 @@ export function TaskSwitcher() {
                   bold={idx === selectedIndex}
                 >
                   {idx === selectedIndex ? "▸ " : "  "}
-                  {task.projectName} / {task.label}
+                  {task.repoName} / {task.label}
                 </Text>
                 <Text dimColor>
                   {" "}&quot;{task.description.slice(0, 30)}

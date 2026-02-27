@@ -3,120 +3,113 @@ import { Box, Text, useInput } from "ink";
 import InkTextInput from "ink-text-input";
 import { useStore } from "../store/index.js";
 import {
-  getAllProjects,
-  addProject,
-  deleteProject,
-  touchProject,
-  updateProjectGroup,
+  getAllRepos,
+  addRepo,
+  deleteRepo,
+  touchRepo,
+  updateRepoProject,
+  getTasksForRepo,
 } from "../services/db.js";
-import { getTasksForProject } from "../services/db.js";
 import { StatusDots } from "../components/StatusDots.js";
 import { EmbeddedTerminal, getCwd } from "../components/EmbeddedTerminal.js";
 import { destroySession } from "../services/terminalManager.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
-import type { Project } from "../store/types.js";
+import type { Repo } from "../store/types.js";
 import { homedir } from "os";
 import { $ } from "bun";
 
-type AddProjectPhase =
+type AddRepoPhase =
   | "method-select"
   | "navigate"
   | "navigate-confirm"
-  | "clone-group"
-  | "clone-new-group"
+  | "clone-project"
+  | "clone-new-project"
   | "clone-url"
   | "clone-progress"
   | null;
 
 export function ProjectSelection() {
-  const projects = useStore((s) => s.projects);
-  const setProjects = useStore((s) => s.setProjects);
+  const repos = useStore((s) => s.repos);
+  const setRepos = useStore((s) => s.setRepos);
   const selectedIndex = useStore((s) => s.selectedIndex);
   const setSelectedIndex = useStore((s) => s.setSelectedIndex);
-  const setActiveProject = useStore((s) => s.setActiveProject);
+  const setActiveRepo = useStore((s) => s.setActiveRepo);
   const setView = useStore((s) => s.setView);
-  const addingProject = useStore((s) => s.addingProject);
-  const setAddingProject = useStore((s) => s.setAddingProject);
+  const addingRepo = useStore((s) => s.addingRepo);
+  const setAddingRepo = useStore((s) => s.setAddingRepo);
   const setTasks = useStore((s) => s.setTasks);
 
   const taskStatuses = useStore((s) => s.taskStatuses);
   const [error, setError] = useState("");
   const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
-  const [projectTaskIds, setProjectTaskIds] = useState<
-    Record<string, string[]>
-  >({});
-  const [confirmDelete, setConfirmDelete] = useState<Project | null>(null);
-  const [editingGroupProjectId, setEditingGroupProjectId] = useState<
-    string | null
-  >(null);
-  const [groupEditValue, setGroupEditValue] = useState("");
-  const [groupEditError, setGroupEditError] = useState("");
+  const [repoTaskIds, setRepoTaskIds] = useState<Record<string, string[]>>({});
+  const [confirmDelete, setConfirmDelete] = useState<Repo | null>(null);
+  const [editingProjectRepoId, setEditingProjectRepoId] = useState<string | null>(
+    null,
+  );
+  const [projectEditValue, setProjectEditValue] = useState("");
+  const [projectEditError, setProjectEditError] = useState("");
 
-  // Add-project flow state
-  const [addProjectPhase, setAddProjectPhase] =
-    useState<AddProjectPhase>(null);
+  const [addRepoPhase, setAddRepoPhase] = useState<AddRepoPhase>(null);
   const [capturedPath, setCapturedPath] = useState("");
   const [terminalError, setTerminalError] = useState("");
 
-  // Method select state
   const [methodIndex, setMethodIndex] = useState(0);
 
-  // Clone flow state
-  const [cloneGroupIndex, setCloneGroupIndex] = useState(0);
-  const [cloneGroupName, setCloneGroupName] = useState("");
-  const [newGroupName, setNewGroupName] = useState("");
+  const [cloneProjectIndex, setCloneProjectIndex] = useState(0);
+  const [cloneProjectName, setCloneProjectName] = useState("");
+  const [newProjectName, setNewProjectName] = useState("");
   const [cloneUrl, setCloneUrl] = useState("");
   const [cloneError, setCloneError] = useState("");
 
-  // Derive unique group names from projects
-  const existingGroups = [...new Set(projects.map((p) => p.group_name))].sort();
+  const existingProjects = [...new Set(repos.map((r) => r.project_name))].sort();
 
-  // Load projects on mount
-  useEffect(() => {
-    const loaded = getAllProjects();
-    setProjects(loaded);
+  function reloadRepos() {
+    const updated = getAllRepos();
+    setRepos(updated);
     const counts: Record<string, number> = {};
     const taskIds: Record<string, string[]> = {};
-    for (const p of loaded) {
-      const active = getTasksForProject(p.id).filter(
-        (t) => t.status === "active",
-      );
-      counts[p.id] = active.length;
-      taskIds[p.id] = active.map((t) => t.id);
+    for (const repo of updated) {
+      const active = getTasksForRepo(repo.id).filter((t) => t.status === "active");
+      counts[repo.id] = active.length;
+      taskIds[repo.id] = active.map((t) => t.id);
     }
     setTaskCounts(counts);
-    setProjectTaskIds(taskIds);
+    setRepoTaskIds(taskIds);
+  }
+
+  useEffect(() => {
+    reloadRepos();
   }, []);
 
-  // When addingProject becomes true, start at method-select
   useEffect(() => {
-    if (addingProject) {
-      setAddProjectPhase("method-select");
+    if (addingRepo) {
+      setAddRepoPhase("method-select");
       setMethodIndex(0);
       setCapturedPath("");
       setError("");
       setTerminalError("");
-      setCloneGroupIndex(0);
-      setCloneGroupName("");
-      setNewGroupName("");
+      setCloneProjectIndex(0);
+      setCloneProjectName("");
+      setNewProjectName("");
       setCloneUrl("");
       setCloneError("");
     } else {
-      setAddProjectPhase(null);
+      setAddRepoPhase(null);
     }
-  }, [addingProject]);
+  }, [addingRepo]);
 
   const handleTerminalEsc = (pid: number) => {
     const shellCwd = getCwd("__add-project", pid);
     setCapturedPath(shellCwd);
     destroySession("__add-project");
-    setAddProjectPhase("navigate-confirm");
+    setAddRepoPhase("navigate-confirm");
   };
 
   const handleTerminalError = (message: string) => {
     setTerminalError(message);
     destroySession("__add-project");
-    setAddProjectPhase("navigate-confirm");
+    setAddRepoPhase("navigate-confirm");
   };
 
   function parseRepoName(url: string): string {
@@ -124,21 +117,21 @@ export function ProjectSelection() {
     return lastSegment.replace(/\.git$/, "");
   }
 
-  function reloadProjects() {
-    const updated = getAllProjects();
-    setProjects(updated);
-    const counts: Record<string, number> = {};
-    const taskIds: Record<string, string[]> = {};
-    for (const p of updated) {
-      const active = getTasksForProject(p.id).filter(
-        (t) => t.status === "active",
-      );
-      counts[p.id] = active.length;
-      taskIds[p.id] = active.map((t) => t.id);
+  const handleAddRepo = (path: string) => {
+    const resolvedPath = path.startsWith("~")
+      ? path.replace("~", process.env.HOME || "")
+      : path;
+
+    try {
+      addRepo(resolvedPath);
+      reloadRepos();
+      setAddingRepo(false);
+      setCapturedPath("");
+      setError("");
+    } catch (e: any) {
+      setError(e.message || "Failed to add repo");
     }
-    setTaskCounts(counts);
-    setProjectTaskIds(taskIds);
-  }
+  };
 
   async function handleClone(url: string) {
     const repoName = parseRepoName(url.trim());
@@ -148,12 +141,12 @@ export function ProjectSelection() {
     }
 
     const home = homedir();
-    const targetPath = `${home}/${cloneGroupName}/${repoName}`;
-    setAddProjectPhase("clone-progress");
+    const targetPath = `${home}/${cloneProjectName}/${repoName}`;
+    setAddRepoPhase("clone-progress");
     setCloneError("");
 
     try {
-      await $`mkdir -p ${home}/${cloneGroupName}`;
+      await $`mkdir -p ${home}/${cloneProjectName}`;
       const proc = Bun.spawn(["git", "clone", url.trim(), targetPath], {
         stdin: "ignore",
         stdout: "pipe",
@@ -164,23 +157,55 @@ export function ProjectSelection() {
         const stderr = await new Response(proc.stderr).text();
         throw new Error(stderr.trim() || "Clone failed");
       }
-      addProject(targetPath, cloneGroupName);
-      reloadProjects();
-      setAddingProject(false);
+      addRepo(targetPath, cloneProjectName);
+      reloadRepos();
+      setAddingRepo(false);
     } catch (e: any) {
       setCloneError(e.message || "Clone failed");
-      setAddProjectPhase("clone-url");
+      setAddRepoPhase("clone-url");
     }
   }
 
-  useInput((input, key) => {
-    // Navigate phase: terminal handles its own input
-    if (addProjectPhase === "navigate") return;
+  const handleProjectEditSubmit = (value: string) => {
+    if (!editingProjectRepoId) return;
+    const normalized = value.trim();
+    if (!normalized) {
+      setProjectEditError("Project name cannot be empty.");
+      return;
+    }
 
-    // Method select phase
-    if (addProjectPhase === "method-select") {
+    try {
+      updateRepoProject(editingProjectRepoId, normalized);
+      const updated = getAllRepos();
+      const selectedRepoId = editingProjectRepoId;
+      setRepos(updated);
+      const nextIndex = updated.findIndex((r) => r.id === selectedRepoId);
+      setSelectedIndex(nextIndex === -1 ? 0 : nextIndex);
+      setEditingProjectRepoId(null);
+      setProjectEditValue("");
+      setProjectEditError("");
+      reloadRepos();
+    } catch (e: any) {
+      setProjectEditError(e.message || "Failed to update project.");
+    }
+  };
+
+  const handleConfirmDelete = () => {
+    if (!confirmDelete) return;
+    deleteRepo(confirmDelete.id);
+    const updated = getAllRepos();
+    setRepos(updated);
+    setSelectedIndex(Math.min(selectedIndex, updated.length - 1));
+    setConfirmDelete(null);
+    reloadRepos();
+  };
+
+  useInput((input, key) => {
+    if (addRepoPhase === "navigate") return;
+
+    if (addRepoPhase === "method-select") {
       if (key.escape) {
-        setAddingProject(false);
+        setAddingRepo(false);
         return;
       }
       if (key.upArrow || key.downArrow) {
@@ -189,93 +214,83 @@ export function ProjectSelection() {
       }
       if (key.return) {
         if (methodIndex === 0) {
-          setAddProjectPhase("navigate");
+          setAddRepoPhase("navigate");
         } else {
-          setAddProjectPhase("clone-group");
-          setCloneGroupIndex(0);
+          setAddRepoPhase("clone-project");
+          setCloneProjectIndex(0);
         }
-        return;
       }
       return;
     }
 
-    // Navigate confirm phase (existing flow)
-    if (addProjectPhase === "navigate-confirm") {
+    if (addRepoPhase === "navigate-confirm") {
       if (key.escape) {
-        setAddingProject(false);
+        setAddingRepo(false);
         setCapturedPath("");
         setError("");
         setTerminalError("");
         return;
       }
       if (!terminalError && key.return) {
-        handleAddProject(capturedPath);
-        return;
+        handleAddRepo(capturedPath);
       }
       return;
     }
 
-    // Clone group select phase
-    if (addProjectPhase === "clone-group") {
-      const groupOptions = [...existingGroups, "New group..."];
+    if (addRepoPhase === "clone-project") {
+      const projectOptions = [...existingProjects, "New project..."];
       if (key.escape) {
-        setAddProjectPhase("method-select");
+        setAddRepoPhase("method-select");
         return;
       }
       if (key.upArrow) {
-        setCloneGroupIndex(Math.max(0, cloneGroupIndex - 1));
+        setCloneProjectIndex(Math.max(0, cloneProjectIndex - 1));
         return;
       }
       if (key.downArrow) {
-        setCloneGroupIndex(
-          Math.min(groupOptions.length - 1, cloneGroupIndex + 1),
+        setCloneProjectIndex(
+          Math.min(projectOptions.length - 1, cloneProjectIndex + 1),
         );
         return;
       }
       if (key.return) {
-        if (cloneGroupIndex === groupOptions.length - 1) {
-          setAddProjectPhase("clone-new-group");
-          setNewGroupName("");
+        if (cloneProjectIndex === projectOptions.length - 1) {
+          setAddRepoPhase("clone-new-project");
+          setNewProjectName("");
         } else {
-          setCloneGroupName(groupOptions[cloneGroupIndex]);
-          setAddProjectPhase("clone-url");
+          setCloneProjectName(projectOptions[cloneProjectIndex]);
+          setAddRepoPhase("clone-url");
           setCloneUrl("");
           setCloneError("");
         }
-        return;
       }
       return;
     }
 
-    // Clone new group name (Esc only; text handled by InkTextInput)
-    if (addProjectPhase === "clone-new-group") {
+    if (addRepoPhase === "clone-new-project") {
       if (key.escape) {
-        setAddProjectPhase("clone-group");
+        setAddRepoPhase("clone-project");
       }
       return;
     }
 
-    // Clone URL input (Esc only; text handled by InkTextInput)
-    if (addProjectPhase === "clone-url") {
+    if (addRepoPhase === "clone-url") {
       if (key.escape) {
-        setAddProjectPhase("clone-group");
+        setAddRepoPhase("clone-project");
         setCloneError("");
       }
       return;
     }
 
-    // Clone progress: no input
-    if (addProjectPhase === "clone-progress") {
+    if (addRepoPhase === "clone-progress") {
       return;
     }
 
-    // ── Normal project list input ──
-
-    if (editingGroupProjectId) {
+    if (editingProjectRepoId) {
       if (key.escape) {
-        setEditingGroupProjectId(null);
-        setGroupEditValue("");
-        setGroupEditError("");
+        setEditingProjectRepoId(null);
+        setProjectEditValue("");
+        setProjectEditError("");
       }
       return;
     }
@@ -287,85 +302,36 @@ export function ProjectSelection() {
     if (key.upArrow) {
       setSelectedIndex(Math.max(0, selectedIndex - 1));
     } else if (key.downArrow) {
-      setSelectedIndex(Math.min(projects.length - 1, selectedIndex + 1));
-    } else if (key.return && projects.length > 0) {
-      const project = projects[selectedIndex];
-      if (project) {
-        touchProject(project.id);
-        setActiveProject(project);
-        const tasks = getTasksForProject(project.id);
+      setSelectedIndex(Math.min(repos.length - 1, selectedIndex + 1));
+    } else if (key.return && repos.length > 0) {
+      const repo = repos[selectedIndex];
+      if (repo) {
+        touchRepo(repo.id);
+        setActiveRepo(repo);
+        const tasks = getTasksForRepo(repo.id);
         setTasks(tasks);
         setView("tasks");
       }
     } else if (input === "s") {
       setView("settings");
-    } else if (input === "d" && projects.length > 0) {
-      const project = projects[selectedIndex];
-      if (project) {
-        setConfirmDelete(project);
+    } else if (input === "d" && repos.length > 0) {
+      const repo = repos[selectedIndex];
+      if (repo) {
+        setConfirmDelete(repo);
       }
     } else if (input === "u") {
       setView("standup");
-    } else if (input === "g" && projects.length > 0) {
-      const project = projects[selectedIndex];
-      if (project) {
-        setEditingGroupProjectId(project.id);
-        setGroupEditValue(project.group_name);
-        setGroupEditError("");
+    } else if (input === "g" && repos.length > 0) {
+      const repo = repos[selectedIndex];
+      if (repo) {
+        setEditingProjectRepoId(repo.id);
+        setProjectEditValue(repo.project_name);
+        setProjectEditError("");
       }
     }
   });
 
-  const handleAddProject = (path: string) => {
-    const resolvedPath = path.startsWith("~")
-      ? path.replace("~", process.env.HOME || "")
-      : path;
-
-    try {
-      addProject(resolvedPath);
-      reloadProjects();
-      setAddingProject(false);
-      setCapturedPath("");
-      setError("");
-    } catch (e: any) {
-      setError(e.message || "Failed to add project");
-    }
-  };
-
-  const handleGroupEditSubmit = (value: string) => {
-    if (!editingGroupProjectId) return;
-    const normalized = value.trim();
-    if (!normalized) {
-      setGroupEditError("Group name cannot be empty.");
-      return;
-    }
-
-    try {
-      updateProjectGroup(editingGroupProjectId, normalized);
-      const updated = getAllProjects();
-      const selectedProjectId = editingGroupProjectId;
-      setProjects(updated);
-      const nextIndex = updated.findIndex((p) => p.id === selectedProjectId);
-      setSelectedIndex(nextIndex === -1 ? 0 : nextIndex);
-      setEditingGroupProjectId(null);
-      setGroupEditValue("");
-      setGroupEditError("");
-    } catch (e: any) {
-      setGroupEditError(e.message || "Failed to update group.");
-    }
-  };
-
-  const handleConfirmDelete = () => {
-    if (!confirmDelete) return;
-    deleteProject(confirmDelete.id);
-    const updated = getAllProjects();
-    setProjects(updated);
-    setSelectedIndex(Math.min(selectedIndex, updated.length - 1));
-    setConfirmDelete(null);
-  };
-
-  // ── Render: Navigate terminal ──
-  if (addProjectPhase === "navigate") {
+  if (addRepoPhase === "navigate") {
     return (
       <Box flexDirection="column" paddingX={1} flexGrow={1}>
         <Box marginBottom={1}>
@@ -373,12 +339,10 @@ export function ProjectSelection() {
             {" "}
             GLADIUS{" "}
           </Text>
-          <Text dimColor> Add Project</Text>
+          <Text dimColor> Add Repo</Text>
         </Box>
         <Box marginBottom={1}>
-          <Text dimColor>
-            cd to your project directory, then press Esc Confirm
-          </Text>
+          <Text dimColor>cd to your repository directory, then press Esc Confirm</Text>
         </Box>
         <EmbeddedTerminal
           taskId="__add-project"
@@ -391,7 +355,6 @@ export function ProjectSelection() {
     );
   }
 
-  // ── Main render ──
   return (
     <Box flexDirection="column" paddingX={1} flexGrow={1}>
       <Box marginBottom={1}>
@@ -402,20 +365,19 @@ export function ProjectSelection() {
       </Box>
 
       <Box justifyContent="space-between" marginBottom={1}>
-        <Text bold>Projects</Text>
-        <Text dimColor>Ctrl+N: New g: Group d: Delete</Text>
+        <Text bold>Repos</Text>
+        <Text dimColor>Ctrl+N: New g: Project d: Delete</Text>
       </Box>
 
-      {projects.length === 0 && !addingProject && (
-        <Text dimColor>No projects added. Press Ctrl+N to add one.</Text>
+      {repos.length === 0 && !addingRepo && (
+        <Text dimColor>No repos added. Press Ctrl+N to add one.</Text>
       )}
 
-      {projects.map((project, i) => {
-        const previous = i > 0 ? projects[i - 1] : null;
-        const showGroupHeader =
-          !previous || previous.group_name !== project.group_name;
+      {repos.map((repo, i) => {
+        const previous = i > 0 ? repos[i - 1] : null;
+        const showProjectHeader = !previous || previous.project_name !== repo.project_name;
         const dots = { green: 0, red: 0, orange: 0, yellow: 0, purple: 0 };
-        for (const tid of projectTaskIds[project.id] || []) {
+        for (const tid of repoTaskIds[repo.id] || []) {
           const c = taskStatuses[tid];
           if (c === "green") dots.green++;
           else if (c === "red") dots.red++;
@@ -424,11 +386,11 @@ export function ProjectSelection() {
           else if (c === "purple") dots.purple++;
         }
         return (
-          <Box key={project.id} flexDirection="column">
-            {showGroupHeader && (
+          <Box key={repo.id} flexDirection="column">
+            {showProjectHeader && (
               <Box paddingLeft={1} marginTop={i === 0 ? 0 : 1}>
                 <Text bold color="yellow">
-                  {project.group_name}
+                  {repo.project_name}
                 </Text>
               </Box>
             )}
@@ -439,12 +401,12 @@ export function ProjectSelection() {
                   bold={i === selectedIndex}
                 >
                   {i === selectedIndex ? "▸ " : "  "}
-                  {project.name}
+                  {repo.name}
                 </Text>
                 <Text dimColor>
                   {"  "}
-                  {taskCounts[project.id] || 0} task
-                  {(taskCounts[project.id] || 0) !== 1 ? "s" : ""}
+                  {taskCounts[repo.id] || 0} task
+                  {(taskCounts[repo.id] || 0) !== 1 ? "s" : ""}
                 </Text>
               </Box>
               <StatusDots {...dots} />
@@ -455,14 +417,13 @@ export function ProjectSelection() {
 
       {confirmDelete && (
         <ConfirmModal
-          message={`Delete project "${confirmDelete.name}"?`}
+          message={`Delete repo "${confirmDelete.name}"?`}
           onConfirm={handleConfirmDelete}
           onCancel={() => setConfirmDelete(null)}
         />
       )}
 
-      {/* ── Method Select ── */}
-      {addProjectPhase === "method-select" && (
+      {addRepoPhase === "method-select" && (
         <Box
           flexDirection="column"
           marginTop={1}
@@ -472,7 +433,7 @@ export function ProjectSelection() {
           paddingY={1}
         >
           <Text bold color="cyan">
-            Add Project
+            Add Repo
           </Text>
           <Box marginTop={1} flexDirection="column">
             {["Navigate to directory", "Clone from URL"].map((label, i) => (
@@ -492,8 +453,7 @@ export function ProjectSelection() {
         </Box>
       )}
 
-      {/* ── Navigate Confirm ── */}
-      {addProjectPhase === "navigate-confirm" && terminalError && (
+      {addRepoPhase === "navigate-confirm" && terminalError && (
         <Box
           flexDirection="column"
           marginTop={1}
@@ -502,16 +462,12 @@ export function ProjectSelection() {
           paddingX={1}
           paddingY={1}
         >
-          <Text bold color="red">
-            Terminal Error
-          </Text>
+          <Text bold color="red">Terminal Error</Text>
           <Box marginTop={1}>
             <Text color="red">{terminalError}</Text>
           </Box>
           <Box marginTop={1}>
-            <Text dimColor>
-              Try closing unused terminal tabs to free PTY devices.
-            </Text>
+            <Text dimColor>Try closing unused terminal tabs to free PTY devices.</Text>
           </Box>
           <Box marginTop={1}>
             <Text dimColor>Esc Cancel</Text>
@@ -519,7 +475,7 @@ export function ProjectSelection() {
         </Box>
       )}
 
-      {addProjectPhase === "navigate-confirm" && !terminalError && (
+      {addRepoPhase === "navigate-confirm" && !terminalError && (
         <Box
           flexDirection="column"
           marginTop={1}
@@ -528,9 +484,7 @@ export function ProjectSelection() {
           paddingX={1}
           paddingY={1}
         >
-          <Text bold color="cyan">
-            Add project at:
-          </Text>
+          <Text bold color="cyan">Add repo at:</Text>
           <Box marginTop={1}>
             <Text>{capturedPath}</Text>
           </Box>
@@ -545,8 +499,7 @@ export function ProjectSelection() {
         </Box>
       )}
 
-      {/* ── Clone: Group Select ── */}
-      {addProjectPhase === "clone-group" && (
+      {addRepoPhase === "clone-project" && (
         <Box
           flexDirection="column"
           marginTop={1}
@@ -555,17 +508,15 @@ export function ProjectSelection() {
           paddingX={1}
           paddingY={1}
         >
-          <Text bold color="cyan">
-            Select Group
-          </Text>
+          <Text bold color="cyan">Select Project</Text>
           <Box marginTop={1} flexDirection="column">
-            {[...existingGroups, "New group..."].map((label, i) => (
+            {[...existingProjects, "New project..."].map((label, i) => (
               <Text
                 key={label}
-                color={i === cloneGroupIndex ? "cyan" : undefined}
-                bold={i === cloneGroupIndex}
+                color={i === cloneProjectIndex ? "cyan" : undefined}
+                bold={i === cloneProjectIndex}
               >
-                {i === cloneGroupIndex ? "▸ " : "  "}
+                {i === cloneProjectIndex ? "▸ " : "  "}
                 {label}
               </Text>
             ))}
@@ -576,8 +527,7 @@ export function ProjectSelection() {
         </Box>
       )}
 
-      {/* ── Clone: New Group Name ── */}
-      {addProjectPhase === "clone-new-group" && (
+      {addRepoPhase === "clone-new-project" && (
         <Box
           flexDirection="column"
           marginTop={1}
@@ -586,19 +536,17 @@ export function ProjectSelection() {
           paddingX={1}
           paddingY={1}
         >
-          <Text bold color="cyan">
-            New Group Name
-          </Text>
+          <Text bold color="cyan">New Project Name</Text>
           <Box marginTop={1}>
-            <Text>Group: </Text>
+            <Text>Project: </Text>
             <InkTextInput
-              value={newGroupName}
-              onChange={setNewGroupName}
+              value={newProjectName}
+              onChange={setNewProjectName}
               onSubmit={(value) => {
                 const trimmed = value.trim();
                 if (!trimmed) return;
-                setCloneGroupName(trimmed);
-                setAddProjectPhase("clone-url");
+                setCloneProjectName(trimmed);
+                setAddRepoPhase("clone-url");
                 setCloneUrl("");
                 setCloneError("");
               }}
@@ -610,8 +558,7 @@ export function ProjectSelection() {
         </Box>
       )}
 
-      {/* ── Clone: URL Input ── */}
-      {addProjectPhase === "clone-url" && (
+      {addRepoPhase === "clone-url" && (
         <Box
           flexDirection="column"
           marginTop={1}
@@ -620,12 +567,10 @@ export function ProjectSelection() {
           paddingX={1}
           paddingY={1}
         >
-          <Text bold color="cyan">
-            Clone Repository
-          </Text>
+          <Text bold color="cyan">Clone Repository</Text>
           <Box marginTop={1}>
             <Text dimColor>
-              Group: <Text color="white">{cloneGroupName}</Text>
+              Project: <Text color="white">{cloneProjectName}</Text>
             </Text>
           </Box>
           <Box marginTop={1}>
@@ -636,7 +581,6 @@ export function ProjectSelection() {
               onSubmit={(value) => {
                 const trimmed = value.trim();
                 if (!trimmed) return;
-                // Auto-convert HTTPS GitHub URLs to SSH
                 const httpsMatch = trimmed.match(
                   /^https:\/\/github\.com\/([^/]+\/[^/]+?)(?:\.git)?$/,
                 );
@@ -665,8 +609,7 @@ export function ProjectSelection() {
         </Box>
       )}
 
-      {/* ── Clone: Progress ── */}
-      {addProjectPhase === "clone-progress" && (
+      {addRepoPhase === "clone-progress" && (
         <Box
           flexDirection="column"
           marginTop={1}
@@ -675,18 +618,16 @@ export function ProjectSelection() {
           paddingX={1}
           paddingY={1}
         >
-          <Text bold color="cyan">
-            Cloning...
-          </Text>
+          <Text bold color="cyan">Cloning...</Text>
           <Box marginTop={1}>
             <Text dimColor>
-              {cloneGroupName}/{parseRepoName(cloneUrl)}
+              {cloneProjectName}/{parseRepoName(cloneUrl)}
             </Text>
           </Box>
         </Box>
       )}
 
-      {editingGroupProjectId && (
+      {editingProjectRepoId && (
         <Box
           flexDirection="column"
           marginTop={1}
@@ -695,20 +636,18 @@ export function ProjectSelection() {
           paddingX={1}
           paddingY={1}
         >
-          <Text bold color="yellow">
-            Edit project group
-          </Text>
+          <Text bold color="yellow">Edit project</Text>
           <Box marginTop={1}>
-            <Text>Group: </Text>
+            <Text>Project: </Text>
             <InkTextInput
-              value={groupEditValue}
-              onChange={setGroupEditValue}
-              onSubmit={handleGroupEditSubmit}
+              value={projectEditValue}
+              onChange={setProjectEditValue}
+              onSubmit={handleProjectEditSubmit}
             />
           </Box>
-          {groupEditError && (
+          {projectEditError && (
             <Box marginTop={1}>
-              <Text color="red">{groupEditError}</Text>
+              <Text color="red">{projectEditError}</Text>
             </Box>
           )}
           <Box marginTop={1}>
