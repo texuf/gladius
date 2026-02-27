@@ -126,7 +126,7 @@ export interface AppState {
   chordBuffer: string;
   copyMode: boolean;
 
-  // Project Selection
+  // Repo Selection
   addingRepo: boolean;
 
   // Cached data

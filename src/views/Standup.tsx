@@ -23,7 +23,7 @@ export function Standup() {
     const apiKey = getAppState("settings.openai_api_key");
     if (!apiKey) {
       setErrorMsg(
-        "No OpenAI API key configured. Press 's' from Project Selection to open Settings.",
+        "No OpenAI API key configured. Press 's' from Repo Selection to open Settings.",
       );
       setPhase("error");
       return;

@@ -6,7 +6,7 @@ import {
   getRepoById,
   getTasksForRepo,
 } from "./services/db.js";
-import { ProjectSelection } from "./views/ProjectSelection.js";
+import { RepoSelection } from "./views/RepoSelection.js";
 import { TaskList } from "./views/TaskList.js";
 import { TaskView } from "./views/TaskView.js";
 import { TaskSwitcher } from "./views/TaskSwitcher.js";
@@ -111,13 +111,13 @@ export function App() {
     const focusPane = useStore.getState().focusPane;
     if (modal || addingRepo || focusPane !== "none") return;
 
-    // Esc on task list -> Project Selection
+    // Esc on task list -> Repo Selection
     if (key.escape && view === "tasks") {
       setView("projects");
       return;
     }
 
-    // Ctrl+O / Cmd+Shift+0 — Return to Project Selection
+    // Ctrl+O / Cmd+Shift+0 — Return to Repo Selection
     if ((input === "o" && key.ctrl) || (input === ")" && key.super)) {
       setView("projects");
       return;
@@ -161,7 +161,7 @@ export function App() {
   const renderView = () => {
     switch (view) {
       case "projects":
-        return <ProjectSelection />;
+        return <RepoSelection />;
       case "tasks":
         return <TaskList />;
       case "taskView":
@@ -177,7 +177,7 @@ export function App() {
       case "standup":
         return <Standup />;
       default:
-        return <ProjectSelection />;
+        return <RepoSelection />;
     }
   };
 

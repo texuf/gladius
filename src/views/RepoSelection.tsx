@@ -28,7 +28,7 @@ type AddRepoPhase =
   | "clone-progress"
   | null;
 
-export function ProjectSelection() {
+export function RepoSelection() {
   const repos = useStore((s) => s.repos);
   const setRepos = useStore((s) => s.setRepos);
   const selectedIndex = useStore((s) => s.selectedIndex);
@@ -100,15 +100,15 @@ export function ProjectSelection() {
   }, [addingRepo]);
 
   const handleTerminalEsc = (pid: number) => {
-    const shellCwd = getCwd("__add-project", pid);
+    const shellCwd = getCwd("__add-repo", pid);
     setCapturedPath(shellCwd);
-    destroySession("__add-project");
+    destroySession("__add-repo");
     setAddRepoPhase("navigate-confirm");
   };
 
   const handleTerminalError = (message: string) => {
     setTerminalError(message);
-    destroySession("__add-project");
+    destroySession("__add-repo");
     setAddRepoPhase("navigate-confirm");
   };
 
@@ -345,7 +345,7 @@ export function ProjectSelection() {
           <Text dimColor>cd to your repository directory, then press Esc Confirm</Text>
         </Box>
         <EmbeddedTerminal
-          taskId="__add-project"
+          taskId="__add-repo"
           cwd={process.env.HOME || "/"}
           singleEsc
           onEsc={handleTerminalEsc}

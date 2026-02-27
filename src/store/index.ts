@@ -19,7 +19,7 @@ export const useStore = create<AppState>((set) => ({
   chordBuffer: "",
   copyMode: false,
 
-  // Project Selection
+  // Repo Selection
   addingRepo: false,
 
   // Cached data

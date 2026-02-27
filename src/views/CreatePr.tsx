@@ -112,7 +112,7 @@ export function CreatePr() {
     try {
       const apiKey = getAppState("settings.openai_api_key");
       if (!apiKey) {
-        setErrorMsg("OpenAI API key not set. Press 's' in Project Selection to open Settings.");
+        setErrorMsg("OpenAI API key not set. Press 's' in Repo Selection to open Settings.");
         setPhase("error");
         return;
       }
