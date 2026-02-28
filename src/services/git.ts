@@ -30,6 +30,7 @@ export async function getGitStatus(
   const branch = branchName || (await getCurrentBranch(repoPath));
 
   let hasTrackingBranch = false;
+  let _tracksMain = false;
   let ahead = 0;
   let behind = 0;
   let behindMain = 0;
@@ -45,8 +46,10 @@ export async function getGitStatus(
     // No upstream configured
   }
   if (upstream) {
+    const upstreamBranch = upstream.replace(/^origin\//, "");
+    _tracksMain = upstreamBranch === "main" || upstreamBranch === "master";
+
     try {
-      // Only mark tracking as present if upstream comparison succeeds.
       const revList =
         await $`git -C ${repoPath} rev-list --left-right --count ${branch}...${upstream} 2>/dev/null`.text();
       const parts = revList.trim().split(/\s+/);
@@ -84,6 +87,7 @@ export async function getGitStatus(
   return {
     branch,
     hasTrackingBranch,
+    tracksMain: _tracksMain,
     ahead,
     behind,
     behindMain,
@@ -245,10 +249,7 @@ async function getOpenPrStatusesForRepo(
   return fetchPromise;
 }
 
-export function clearPrCacheForBranch(
-  repoPath: string,
-  branch: string,
-): void {
+export function clearPrCacheForBranch(repoPath: string, branch: string): void {
   for (const [, entry] of prStatusCacheByRemote) {
     entry.byBranch.delete(branch);
   }
@@ -342,7 +343,11 @@ export function formatGitStatus(status: GitStatus): string {
   const parts = [status.branch];
 
   if (status.ahead > 0 || status.behind > 0) {
-    parts.push(`(+${status.ahead}/-${status.behind})`);
+    if (status.tracksMain) {
+      parts.push(`(+${status.ahead}/m`);
+    } else {
+      parts.push(`(+${status.ahead}/-${status.behind})`);
+    }
   } else if (status.hasTrackingBranch) {
     parts.push("(=)");
   }
