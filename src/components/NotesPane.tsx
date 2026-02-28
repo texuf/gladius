@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import InkTextInput from "ink-text-input";
 import { useStore } from "../store/index.js";
 import { updateTask } from "../services/db.js";
+import type { GitStatus } from "../store/types.js";
 
 export function NotesPane() {
   const activeTask = useStore((s) => s.activeTask);
@@ -10,10 +11,13 @@ export function NotesPane() {
   const setFocusPane = useStore((s) => s.setFocusPane);
   const setActiveTask = useStore((s) => s.setActiveTask);
   const setTasks = useStore((s) => s.setTasks);
+  const gitStatuses = useStore((s) => s.gitStatuses);
   const [editValue, setEditValue] = useState(activeTask?.description || "");
   const isEditing = focusPane === "notes";
 
   if (!activeTask) return null;
+
+  const pr = gitStatuses[activeTask.id]?.pr;
 
   const handleSubmit = () => {
     if (activeTask) {
@@ -61,6 +65,7 @@ export function NotesPane() {
     >
       <Text bold color="yellow" wrap="wrap">
         {(activeTask.description || "").toUpperCase()}
+        {pr?.title ? ` - #${pr.number} ${pr.title}` : ""}
       </Text>
     </Box>
   );

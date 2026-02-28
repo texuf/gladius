@@ -166,6 +166,7 @@ async function getOpenPrStatusesForRepo(
       pullRequests(first: 100, states: [OPEN, MERGED], orderBy: { field: UPDATED_AT, direction: DESC }) {
         nodes {
           number
+          title
           state
           mergeable
           headRefName
@@ -217,6 +218,7 @@ async function getOpenPrStatusesForRepo(
 
         byBranch.set(headRefName, {
           number: pr.number,
+          title: pr?.title ?? "",
           state: normalizePrState(pr?.state),
           hasConflicts: isConflicting(pr?.mergeable),
           unresolvedThreads,

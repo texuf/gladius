@@ -44,6 +44,7 @@ export interface TaskEvent {
 
 export interface PrStatus {
   number: number;
+  title: string;
   state: "open" | "closed" | "merged";
   hasConflicts: boolean;
   unresolvedThreads: number;
