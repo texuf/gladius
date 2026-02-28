@@ -436,11 +436,13 @@ export function RepoSelection() {
                   {repo.name}
                 </Text>
                 {isDeleting && <Text color="yellow"> [deleting...]</Text>}
-                <Text dimColor>
-                  {"  "}
-                  {taskCounts[repo.id] || 0} task
-                  {(taskCounts[repo.id] || 0) !== 1 ? "s" : ""}
-                </Text>
+                {(taskCounts[repo.id] || 0) > 0 && (
+                  <Text dimColor>
+                    {"  "}
+                    {taskCounts[repo.id]} task
+                    {taskCounts[repo.id] !== 1 ? "s" : ""}
+                  </Text>
+                )}
               </Box>
               <StatusDots {...dots} />
             </Box>
