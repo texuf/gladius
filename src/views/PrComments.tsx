@@ -239,6 +239,7 @@ export function PrComments() {
     const taskId = activeTask.id;
     goBack();
     setTimeout(() => {
+      if (useStore.getState().activeTask?.id !== taskId) return;
       useStore.getState().setFocusPane("console");
       useStore.getState().markConsoleInteracted(taskId);
       pasteToConsoleAndSubmit(taskId, text);
