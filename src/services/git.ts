@@ -20,6 +20,10 @@ const prStatusInFlightByRemote = new Map<
   Promise<Map<string, PrStatus>>
 >();
 
+type PrCandidate = PrStatus & {
+  updatedAtMs: number;
+};
+
 /**
  * Get git status information for a given repo path.
  */
@@ -167,6 +171,7 @@ async function getOpenPrStatusesForRepo(
         nodes {
           number
           title
+          updatedAt
           state
           mergeable
           headRefName
@@ -201,12 +206,14 @@ async function getOpenPrStatusesForRepo(
       const raw = await $`gh api graphql -f query=${query}`.text();
       const data = JSON.parse(raw);
       const prs = data?.data?.repository?.pullRequests?.nodes || [];
-      const byBranch = new Map<string, PrStatus>();
+      const openByBranch = new Map<string, PrCandidate>();
+      const mergedByBranch = new Map<string, PrCandidate>();
 
       for (const pr of prs) {
         const headRefName = pr?.headRefName;
         if (!headRefName || typeof pr?.number !== "number") continue;
 
+        const state = normalizePrState(pr?.state);
         const checks = extractCiCheckNodes(pr?.statusCheckRollup);
         const { ciPassed, ciFailed, ciPending } = summarizeCiChecks(checks);
         const threads = Array.isArray(pr?.reviewThreads?.nodes)
@@ -216,16 +223,47 @@ async function getOpenPrStatusesForRepo(
           (t: any) => !t?.isResolved,
         ).length;
 
-        byBranch.set(headRefName, {
+        const candidate: PrCandidate = {
           number: pr.number,
           title: pr?.title ?? "",
-          state: normalizePrState(pr?.state),
+          state,
           hasConflicts: isConflicting(pr?.mergeable),
           unresolvedThreads,
           ciPassed,
           ciFailed,
           ciPending,
-        });
+          updatedAtMs: Date.parse(pr?.updatedAt || "") || 0,
+        };
+
+        if (state === "open") {
+          const existing = openByBranch.get(headRefName);
+          if (!existing || candidate.updatedAtMs > existing.updatedAtMs) {
+            openByBranch.set(headRefName, candidate);
+          }
+          continue;
+        }
+
+        if (state === "merged") {
+          const existing = mergedByBranch.get(headRefName);
+          if (!existing || candidate.updatedAtMs > existing.updatedAtMs) {
+            mergedByBranch.set(headRefName, candidate);
+          }
+        }
+      }
+
+      const byBranch = new Map<string, PrStatus>();
+
+      // Prefer open PRs for reused branch names.
+      for (const [branch, candidate] of openByBranch) {
+        const { updatedAtMs: _updatedAtMs, ...status } = candidate;
+        byBranch.set(branch, status);
+      }
+
+      // Fall back to merged PR only when there is no open PR.
+      for (const [branch, candidate] of mergedByBranch) {
+        if (byBranch.has(branch)) continue;
+        const { updatedAtMs: _updatedAtMs, ...status } = candidate;
+        byBranch.set(branch, status);
       }
 
       prStatusCacheByRemote.set(remoteUrl, {

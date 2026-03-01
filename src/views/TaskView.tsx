@@ -467,7 +467,9 @@ export function TaskView() {
       {/* Header */}
       <Box justifyContent="space-between" marginBottom={1}>
         <Box>
-          <Text dimColor>{activeTask.label}</Text>
+          <Text dimColor>
+            {activeRepo ? `${activeRepo.name}/` : `${activeTask.label}`}
+          </Text>
           {copyMode && (
             <Text bold color="yellow">
               {" "}
