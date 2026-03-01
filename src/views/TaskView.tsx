@@ -303,7 +303,9 @@ export function TaskView() {
         // Remove PR from git status so the header clears immediately
         const currentGitStatus = gitStatuses[activeTask.id];
         if (currentGitStatus) {
-          useStore.getState().setGitStatus(activeTask.id, { ...currentGitStatus, pr: null });
+          useStore
+            .getState()
+            .setGitStatus(activeTask.id, { ...currentGitStatus, pr: null });
         }
       } else if (!pr) {
         setView("createPr");
@@ -404,7 +406,8 @@ export function TaskView() {
   const handleRebase = async () => {
     if (!activeTask?.worktree_path) return;
     const sessionName = `gladius-${activeTask.id}-console`;
-    const prompt = "Please rebase this branch onto main and resolve any conflicts. Run: git fetch origin main && git rebase origin/main. If there are conflicts, resolve them and continue the rebase.";
+    const prompt =
+      "Please rebase this branch onto main and resolve any conflicts. Run: git fetch origin main && git rebase origin/main. If there are conflicts, resolve them and continue the rebase.";
     try {
       await $`tmux -L gladius send-keys -t ${sessionName} ${prompt} Enter`;
     } catch {}
@@ -446,7 +449,8 @@ export function TaskView() {
     !!gitStatus &&
     gitStatus.hasTrackingBranch &&
     gitStatus.ahead === 0 &&
-    gitStatus.behind === 0;
+    gitStatus.behind === 0 &&
+    !gitStatus.tracksMain;
 
   // Aggregate status dots for ALL tasks (including active)
   const allDots = { green: 0, red: 0, orange: 0, yellow: 0, purple: 0 };
@@ -463,9 +467,7 @@ export function TaskView() {
       {/* Header */}
       <Box justifyContent="space-between" marginBottom={1}>
         <Box>
-          <Text dimColor>
-            {activeTask.label}
-          </Text>
+          <Text dimColor>{activeTask.label}</Text>
           {copyMode && (
             <Text bold color="yellow">
               {" "}
@@ -479,24 +481,35 @@ export function TaskView() {
               {gitStatus && (
                 <>
                   <Text color="cyan"> {gitStatus.branch}</Text>
-                  {(gitStatus.ahead > 0 || gitStatus.behind > 0 || isEvenWithTracking) && (
+                  {(gitStatus.ahead > 0 ||
+                    gitStatus.behind > 0 ||
+                    gitStatus.tracksMain ||
+                    isEvenWithTracking) && (
                     <Text color="cyan">
                       {" ("}
                       {isEvenWithTracking ? (
                         <Text color="yellow">=</Text>
                       ) : (
                         <>
-                          {gitStatus.ahead > 0 && <Text color="yellow">+{gitStatus.ahead}</Text>}
-                          {gitStatus.ahead > 0 && gitStatus.behind > 0 && "/"}
-                          {gitStatus.behind > 0 && <Text color="yellow">-{gitStatus.behind}</Text>}
+                          <Text color="yellow">+{gitStatus.ahead}</Text>/
+                          {!gitStatus.tracksMain && (
+                            <Text color="yellow">-{gitStatus.behind}</Text>
+                          )}
+                          {gitStatus.tracksMain && <Text color="white">m</Text>}
                         </>
                       )}
                       {")"}
                     </Text>
                   )}
-                  {gitStatus.behindMain > 0 && <Text color="cyan"> [-{gitStatus.behindMain}]</Text>}
+                  {gitStatus.behindMain > 0 && (
+                    <Text color="cyan"> [-{gitStatus.behindMain}]</Text>
+                  )}
                   {gitStatus.changedFiles > 0 && (
-                    <Text color="yellow"> {gitStatus.changedFiles} file{gitStatus.changedFiles !== 1 ? "s" : ""}</Text>
+                    <Text color="yellow">
+                      {" "}
+                      {gitStatus.changedFiles} file
+                      {gitStatus.changedFiles !== 1 ? "s" : ""}
+                    </Text>
                   )}
                 </>
               )}

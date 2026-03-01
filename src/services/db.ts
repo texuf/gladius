@@ -458,7 +458,7 @@ export function getAllRepos(): Repo[] {
               r.created_at, r.last_accessed_at
        FROM repos r
        JOIN projects p ON r.project_id = p.id
-       ORDER BY p.name ASC, r.last_accessed_at DESC`,
+       ORDER BY p.name ASC, r.name COLLATE NOCASE ASC`,
     )
     .all() as Repo[];
 }

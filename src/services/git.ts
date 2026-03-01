@@ -344,9 +344,9 @@ export async function getCurrentBranch(repoPath: string): Promise<string> {
 export function formatGitStatus(status: GitStatus): string {
   const parts = [status.branch];
 
-  if (status.ahead > 0 || status.behind > 0) {
+  if (status.ahead > 0 || status.behind > 0 || status.tracksMain) {
     if (status.tracksMain) {
-      parts.push(`(+${status.ahead}/m`);
+      parts.push(`(+${status.ahead}/m)`);
     } else {
       parts.push(`(+${status.ahead}/-${status.behind})`);
     }
