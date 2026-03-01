@@ -43,14 +43,14 @@ export function HotkeyHints() {
   } else if (view === "taskSwitcher") {
     hints.push("↑↓ Navigate", "⏎ Switch", "Esc Cancel");
   } else if (view === "projects" && addingRepo) {
-    hints.push("Esc Cancel");
+    hints.push("⏎ Create", "Esc Cancel");
   } else if (view === "settings") {
     hints.push("↑↓ Navigate", "⏎ Edit", "Esc Back");
   } else if (view === "projects") {
     hints.push(
       "↑↓ Navigate",
       "⏎ Select",
-      "Ctrl+N New Repo",
+      "Ctrl+N New Project",
       "g Project",
       "d Delete",
       "u Standup",

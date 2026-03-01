@@ -159,7 +159,7 @@ export function App() {
       return;
     }
 
-    // Ctrl+N — Context-sensitive: add project (project view) or new task (task/taskView)
+    // Ctrl+N — Context-sensitive: create project (repos) or new task (task/taskView)
     if (input === "n" && mod) {
       if (view === "projects") {
         useStore.getState().setAddingRepo(true);

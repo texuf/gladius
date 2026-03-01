@@ -444,6 +444,16 @@ export function getProjectById(id: string): Project | null {
   );
 }
 
+export function createProject(name: string, path?: string): Project {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    throw new Error("Project name cannot be empty");
+  }
+
+  const projectPath = normalizePath(path || join(homedir(), trimmed));
+  return resolveProjectByPath(projectPath, trimmed);
+}
+
 export function touchProject(id: string): void {
   touchProjectInternal(id);
 }
