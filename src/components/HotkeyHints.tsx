@@ -51,6 +51,7 @@ export function HotkeyHints() {
       "↑↓ Navigate",
       "⏎ Select",
       "Ctrl+N New Project",
+      "r Refresh",
       "g Project",
       "d Delete",
       "u Standup",

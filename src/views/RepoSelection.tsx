@@ -8,9 +8,11 @@ import { useStore } from "../store/index.js";
 import {
   createProject,
   deleteRepo,
+  getAllProjects,
   getAllRepos,
   getProjectById,
   getTasksForRepo,
+  refreshProjectRepos,
   touchProject,
   touchRepo,
 } from "../services/db.js";
@@ -41,6 +43,8 @@ export function RepoSelection() {
   const [deletingRepoId, setDeletingRepoId] = useState<string | null>(null);
   const [createProjectName, setCreateProjectName] = useState("");
   const [createProjectError, setCreateProjectError] = useState("");
+  const [refreshingProjects, setRefreshingProjects] = useState(false);
+  const [refreshMessage, setRefreshMessage] = useState("");
 
   function reloadRepos(): Repo[] {
     const updated = getAllRepos();
@@ -167,6 +171,44 @@ export function RepoSelection() {
     })();
   };
 
+  const handleRefreshAllProjects = () => {
+    if (refreshingProjects) return;
+    setRefreshingProjects(true);
+    setRefreshMessage("");
+    setError("");
+
+    try {
+      const projects = getAllProjects();
+      let refreshed = 0;
+      let discovered = 0;
+      let added = 0;
+      let reassigned = 0;
+      const failures: string[] = [];
+
+      for (const project of projects) {
+        try {
+          const result = refreshProjectRepos(project.id);
+          refreshed += 1;
+          discovered += result.discovered;
+          added += result.added;
+          reassigned += result.reassigned;
+        } catch (e: any) {
+          failures.push(`${project.name}: ${e.message || "refresh failed"}`);
+        }
+      }
+
+      reloadRepos();
+      if (failures.length > 0) {
+        setError(failures[0]);
+      }
+      setRefreshMessage(
+        `refreshed ${refreshed}/${projects.length} projects · found ${discovered} repos · +${added} new · ${reassigned} reassigned`,
+      );
+    } finally {
+      setRefreshingProjects(false);
+    }
+  };
+
   useInput((input, key) => {
     if (deletingRepoId) return;
 
@@ -200,6 +242,8 @@ export function RepoSelection() {
       if (repo) setConfirmDelete(repo);
     } else if (input === "u") {
       setView("standup");
+    } else if (input === "r") {
+      handleRefreshAllProjects();
     } else if (input === "g" && repos.length > 0) {
       const repo = repos[selectedIndex];
       if (!repo) return;
@@ -230,7 +274,7 @@ export function RepoSelection() {
 
       <Box justifyContent="space-between" marginBottom={1}>
         <Text bold>Repos</Text>
-        <Text dimColor>Ctrl+N: New Project g: Project d: Delete</Text>
+        <Text dimColor>Ctrl+N: New Project r: Refresh g: Project d: Delete</Text>
       </Box>
 
       {repos.length === 0 && !addingRepo && (
@@ -328,6 +372,16 @@ export function RepoSelection() {
       {error && (
         <Box marginTop={1}>
           <Text color="red">{error}</Text>
+        </Box>
+      )}
+      {refreshingProjects && (
+        <Box marginTop={1}>
+          <Text dimColor>Refreshing projects...</Text>
+        </Box>
+      )}
+      {!refreshingProjects && refreshMessage && (
+        <Box marginTop={1}>
+          <Text dimColor>{refreshMessage}</Text>
         </Box>
       )}
     </Box>
