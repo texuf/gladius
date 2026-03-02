@@ -3,6 +3,7 @@ import { Box, Text, useInput } from "ink";
 import { $ } from "bun";
 import { useStore } from "../store/index.js";
 import { NotesPane } from "../components/NotesPane.js";
+import { TaskStatusPane } from "../components/TaskStatusPane.js";
 import { TerminalPane } from "../components/TerminalPane.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { processChord } from "../utils/keyboard.js";
@@ -553,20 +554,25 @@ export function TaskView() {
       {/* Notes Pane (20%) */}
       <NotesPane />
 
-      {/* Terminal Pane (15%) */}
+      {/* Status Pane */}
+      <TaskStatusPane task={activeTask} />
+
+      {/* Terminal Pane */}
       <TerminalPane
         type="terminal"
         label="Terminal"
         focusKey="t"
         paused={copyMode}
+        layout="task"
       />
 
-      {/* Console Pane (65%) */}
+      {/* Console Pane */}
       <TerminalPane
         type="console"
         label="Console"
         focusKey="c"
         paused={copyMode}
+        layout="task"
       />
 
       {/* Confirm Modal */}

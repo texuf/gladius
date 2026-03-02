@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { useStore } from "../store/index.js";
 import { TerminalPane } from "../components/TerminalPane.js";
@@ -27,6 +27,7 @@ export function ProjectView() {
   const [model, setModel] = useState<"claude" | "codex" | null>(null);
   const [refreshStatus, setRefreshStatus] = useState("");
   const [error, setError] = useState("");
+  const prevFocusPaneRef = useRef(focusPane);
 
   const workspaceId = activeProject ? `project-${activeProject.id}` : "";
   const projectRepos = useMemo(
@@ -52,13 +53,14 @@ export function ProjectView() {
     setFocusPane("console");
   };
 
-  const runRefresh = () => {
-    if (!activeProject) return;
+  const runRefresh = useCallback(() => {
+    const projectId = activeProject?.id;
+    if (!projectId) return;
     try {
-      const result = refreshProjectRepos(activeProject.id);
+      const result = refreshProjectRepos(projectId);
       const updatedRepos = getAllRepos();
       setRepos(updatedRepos);
-      const updatedProject = getProjectById(activeProject.id);
+      const updatedProject = getProjectById(projectId);
       if (updatedProject) {
         setActiveProject(updatedProject);
       }
@@ -69,7 +71,14 @@ export function ProjectView() {
     } catch (e: any) {
       setError(e.message || "Refresh failed");
     }
-  };
+  }, [activeProject?.id, setActiveProject, setRepos]);
+
+  useEffect(() => {
+    if (prevFocusPaneRef.current === "terminal" && focusPane === "none") {
+      runRefresh();
+    }
+    prevFocusPaneRef.current = focusPane;
+  }, [focusPane, runRefresh]);
 
   useInput((input, key) => {
     if (!activeProject) return;
@@ -155,6 +164,7 @@ export function ProjectView() {
         type="terminal"
         label="Terminal"
         focusKey="t"
+        layout="project"
         workspaceId={workspaceId}
         cwd={activeProject.path}
         captureSessionIds={false}
@@ -164,6 +174,7 @@ export function ProjectView() {
         type="console"
         label="Console"
         focusKey="c"
+        layout="project"
         workspaceId={workspaceId}
         cwd={activeProject.path}
         model={model}

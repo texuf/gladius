@@ -2,6 +2,10 @@ import { homedir } from "os";
 import { join } from "path";
 import { readdirSync, existsSync, statSync } from "fs";
 
+function encodeClaudeProjectPath(worktreePath: string): string {
+  return worktreePath.replaceAll("/", "-").replaceAll(".", "-");
+}
+
 /**
  * Find the most recently modified .jsonl file in a directory.
  * Returns the session ID (filename without extension) or null.
@@ -33,9 +37,16 @@ export function watchForClaudeSessionId(
   callback: (sessionId: string) => void,
   backfillExisting = false,
 ): () => void {
-  // Claude encodes project paths by replacing / with -
-  const encoded = worktreePath.replaceAll("/", "-");
-  const claudeProjectDir = join(homedir(), ".claude", "projects", encoded);
+  const encodedCandidates = [
+    encodeClaudeProjectPath(worktreePath),
+    worktreePath.replaceAll("/", "-"),
+  ];
+  const projectsRoot = join(homedir(), ".claude", "projects");
+  const claudeProjectDir =
+    encodedCandidates
+      .map((encoded) => join(projectsRoot, encoded))
+      .find((candidate) => existsSync(candidate)) ??
+    join(projectsRoot, encodedCandidates[0]);
 
   // If backfilling, immediately return the most recent existing session
   if (backfillExisting) {

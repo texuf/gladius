@@ -10,6 +10,7 @@ interface TerminalPaneProps {
   type: "terminal" | "console";
   label: string;
   focusKey: string;
+  layout?: "task" | "project";
   paused?: boolean;
   workspaceId?: string;
   cwd?: string | null;
@@ -23,9 +24,6 @@ const PANE_CHROME_ROWS = 3;
 // 2 cols for border, 2 cols for paddingX
 const PANE_CHROME_COLS = 4;
 
-// Rows consumed by other TaskView elements:
-// header (1) + marginBottom (1) + NotesPane (~4) + ConsolPane border+header (~3)
-const TASKVIEW_OTHER_ROWS = 9;
 const DEFAULT_PTY_ROWS = 10;
 
 function getTerminalDimensions() {
@@ -36,11 +34,13 @@ function getTerminalDimensions() {
   return { paneRows, ptyRows, ptyCols };
 }
 
-function getConsoleDimensions() {
+function getConsoleDimensions(layout: "task" | "project") {
   const totalRows = process.stdout.rows || 24;
   const totalCols = process.stdout.columns || 80;
-  // Total minus: header(2) + notes(4) + terminal pane(13) + console chrome(3) + outer padding(2)
-  const ptyRows = Math.max(6, totalRows - 2 - 4 - 13 - PANE_CHROME_ROWS - 2);
+  const taskReservedRows = 2 + 4 + 4 + 13 + PANE_CHROME_ROWS + 2;
+  const projectReservedRows = 2 + 5 + 13 + PANE_CHROME_ROWS + 2;
+  const reservedRows = layout === "task" ? taskReservedRows : projectReservedRows;
+  const ptyRows = Math.max(6, totalRows - reservedRows);
   const ptyCols = Math.max(40, totalCols - PANE_CHROME_COLS - 2);
   return { ptyRows, ptyCols };
 }
@@ -49,6 +49,7 @@ export function TerminalPane({
   type,
   label,
   focusKey,
+  layout = "task",
   paused = false,
   workspaceId,
   cwd,
@@ -82,7 +83,7 @@ export function TerminalPane({
   const dims = canEmbed
     ? (type === "terminal" ? getTerminalDimensions() : null)
     : null;
-  const consoleDims = canEmbed && type === "console" ? getConsoleDimensions() : null;
+  const consoleDims = canEmbed && type === "console" ? getConsoleDimensions(layout) : null;
 
   const command = type === "console" && effectiveModel
     ? buildLlmCommand(
