@@ -239,9 +239,10 @@ export function EmbeddedTerminal({
     // Render immediately from existing buffer
     setLines(bufferToAnsiLines(xterm));
 
-    // Raw stdin → PTY with double-Esc detection
+    // Raw stdin → PTY with Esc handling
     // Single Esc → forwarded to PTY (e.g. vim insert→normal)
     // Double Esc (two bare Esc within 300ms) → unfocus pane
+    // Ctrl+] (GS / 0x1d) in console → send a literal Esc to the PTY
     let firstEscTime = 0;
 
     const onStdinData = (data: Buffer | string) => {
@@ -257,6 +258,14 @@ export function EmbeddedTerminal({
 
       const str = typeof data === "string" ? data : data.toString();
       const firstByte = typeof data === "string" ? data.charCodeAt(0) : data[0];
+
+      // Console pane: one-shot "send Esc" without unfocusing.
+      if (singleEsc && str.length === 1 && firstByte === 0x1d) {
+        try {
+          proc.terminal!.write("\x1b");
+        } catch {}
+        return;
+      }
 
       // Check for bare Esc: single \x1b byte
       if (str.length === 1 && firstByte === 0x1b) {

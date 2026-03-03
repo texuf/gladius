@@ -72,6 +72,9 @@ export function HotkeyHints() {
     } else {
       const escHint = focusPane === "terminal" ? "Esc×2" : "Esc";
       hints.push(`${escHint} Unfocus (${focusPane})`);
+      if (focusPane === "console") {
+        hints.push("Ctrl+] Send Esc");
+      }
     }
   } else if (view === "tasks") {
     hints.push(
@@ -142,6 +145,9 @@ export function HotkeyHints() {
     } else {
       const escHint = focusPane === "console" ? "Esc" : "Esc×2";
       hints.push(`${escHint} Unfocus (${focusPane})`);
+      if (focusPane === "console") {
+        hints.push("Ctrl+] Send Esc");
+      }
     }
   } else if (view === "standup") {
     hints.push("c Copy", "r Regenerate", "Esc Back");
