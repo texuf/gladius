@@ -352,7 +352,7 @@ export function EmbeddedTerminal({
       }
       process.stdout.removeListener("resize", onResize);
     };
-  }, [taskId, cwd, propRows, propCols, commandKey]);
+  }, [taskId, propRows, propCols, commandKey]);
 
   // Pause/resume render loop for copy mode
   const xtermRef = useRef<Terminal | null>(null);
