@@ -302,6 +302,21 @@ function extractCiCheckNodes(statusCheckRollup: any): any[] {
   return [];
 }
 
+const CHECKRUN_FAIL_CONCLUSIONS = new Set([
+  "FAILURE",
+  "TIMED_OUT",
+  "CANCELLED",
+  "ACTION_REQUIRED",
+  "STARTUP_FAILURE",
+]);
+
+const CHECKRUN_PASS_CONCLUSIONS = new Set([
+  "SUCCESS",
+  "NEUTRAL",
+  "SKIPPED",
+  "STALE",
+]);
+
 function summarizeCiChecks(checks: any[]): {
   ciPassed: number;
   ciFailed: number;
@@ -317,12 +332,20 @@ function summarizeCiChecks(checks: any[]): {
     const typename =
       typeof check.__typename === "string" ? check.__typename : "";
     if (typename === "CheckRun") {
+      const status = String(check.status || "").toUpperCase();
       const conclusion = String(check.conclusion || "").toUpperCase();
-      if (conclusion === "FAILURE") {
+
+      // A run is pending only while it is not completed.
+      if (status && status !== "COMPLETED") {
+        ciPending += 1;
+      } else if (CHECKRUN_FAIL_CONCLUSIONS.has(conclusion)) {
         ciFailed += 1;
-      } else if (conclusion === "SUCCESS") {
+      } else if (CHECKRUN_PASS_CONCLUSIONS.has(conclusion)) {
         ciPassed += 1;
-      } else if (conclusion !== "SKIPPED") {
+      } else if (status === "COMPLETED") {
+        // Completed checks with unknown conclusions should not block as pending.
+        ciPassed += 1;
+      } else {
         ciPending += 1;
       }
       continue;
@@ -341,13 +364,25 @@ function summarizeCiChecks(checks: any[]): {
     }
 
     // Fallback path for unexpected payload shapes.
+    const status = String(check.status || "").toUpperCase();
     const conclusion = String(check.conclusion || "").toUpperCase();
-    const state = String(check.state || check.status || "").toUpperCase();
-    if (conclusion === "FAILURE" || state === "FAILURE" || state === "ERROR") {
+    const state = String(check.state || "").toUpperCase();
+    if (status && status !== "COMPLETED") {
+      ciPending += 1;
+    } else if (
+      CHECKRUN_FAIL_CONCLUSIONS.has(conclusion) ||
+      state === "FAILURE" ||
+      state === "ERROR"
+    ) {
       ciFailed += 1;
-    } else if (conclusion === "SUCCESS" || state === "SUCCESS") {
+    } else if (
+      CHECKRUN_PASS_CONCLUSIONS.has(conclusion) ||
+      state === "SUCCESS"
+    ) {
       ciPassed += 1;
-    } else if (conclusion !== "SKIPPED") {
+    } else if (status === "COMPLETED") {
+      ciPassed += 1;
+    } else {
       ciPending += 1;
     }
   }

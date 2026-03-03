@@ -539,12 +539,12 @@ export function TaskView() {
               {gitStatus?.pr && (
                 <Text
                   color={
-                    gitStatus.pr.hasConflicts ||
-                    gitStatus.pr.ciFailed > 0 ||
-                    gitStatus.pr.unresolvedThreads > 0
-                      ? "red"
-                      : gitStatus.pr.ciPending > 0
-                        ? "yellow"
+                    gitStatus.pr.ciPending > 0
+                      ? "yellow"
+                      : gitStatus.pr.hasConflicts ||
+                          gitStatus.pr.ciFailed > 0 ||
+                          gitStatus.pr.unresolvedThreads > 0
+                        ? "red"
                         : gitStatus.pr.state === "merged"
                           ? "magenta"
                           : "green"
