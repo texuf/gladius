@@ -140,6 +140,12 @@ export function App() {
     const focusPane = useStore.getState().focusPane;
     if (modal || addingRepo || focusPane !== "none") return;
 
+    // Repos page: plain q quits.
+    if (view === "projects" && input === "q" && !mod) {
+      exit();
+      return;
+    }
+
     // Esc on task list -> Repo Selection
     if (key.escape && view === "tasks") {
       setView("projects");

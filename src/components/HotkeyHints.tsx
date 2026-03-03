@@ -54,6 +54,7 @@ export function HotkeyHints() {
       "r Refresh",
       "g Project",
       "d Delete",
+      "q Quit",
       "u Standup",
       "s Settings",
     );
