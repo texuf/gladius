@@ -20,7 +20,7 @@ import {
   getTasksForRepo,
 } from "../services/db.js";
 import { deleteWorktree } from "../services/worktree.js";
-import { destroySession } from "../services/terminalManager.js";
+import { destroySession, isSessionDead } from "../services/terminalManager.js";
 import { StatusDots } from "../components/StatusDots.js";
 
 export function TaskView() {
@@ -53,6 +53,25 @@ export function TaskView() {
       ...useStore.getState().taskStatuses,
       [taskId]: "yellow",
     });
+  };
+
+  const resetDeadConsoleSession = () => {
+    if (!activeTask?.model) return;
+    const sessionKey = `${activeTask.id}-console`;
+    if (!isSessionDead(sessionKey)) return;
+
+    destroySession(sessionKey);
+
+    const updates = activeTask.model === "claude"
+      ? { claude_session_id: null }
+      : { codex_session_id: null };
+    updateTask(activeTask.id, updates);
+    setActiveTask({ ...activeTask, ...updates });
+    setTasks(
+      useStore
+        .getState()
+        .tasks.map((t) => (t.id === activeTask.id ? { ...t, ...updates } : t)),
+    );
   };
 
   const selectModel = (model: "claude" | "codex") => {
@@ -205,6 +224,7 @@ export function TaskView() {
     }
 
     if (input === "c" && !key.super && activeTask?.model) {
+      resetDeadConsoleSession();
       setFocusPane("console");
       markConsoleInteracted(activeTask.id);
       return;

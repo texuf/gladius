@@ -188,6 +188,7 @@ export function EmbeddedTerminal({
   const procRef = useRef<any>(null);
   const pendingInputRef = useRef<string[]>([]);
   const paneType = taskId.endsWith("-console") ? "console" : "terminal";
+  const commandKey = (command ?? []).join("\u0000");
 
   // Keep focusedRef in sync and flush any buffered input
   useEffect(() => {
@@ -351,7 +352,7 @@ export function EmbeddedTerminal({
       }
       process.stdout.removeListener("resize", onResize);
     };
-  }, [taskId]);
+  }, [taskId, cwd, propRows, propCols, commandKey]);
 
   // Pause/resume render loop for copy mode
   const xtermRef = useRef<Terminal | null>(null);

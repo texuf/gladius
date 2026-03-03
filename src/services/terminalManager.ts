@@ -217,6 +217,50 @@ export function getSession(taskId: string): TerminalSession | undefined {
 }
 
 /**
+ * Returns true when a session exists but its underlying process/pane is dead.
+ * Used to recycle stale "[exited]" console sessions on focus.
+ */
+export function isSessionDead(taskId: string): boolean {
+  const session = sessions.get(taskId);
+
+  // Direct subprocess already exited (non-tmux fallback or detached attach proc).
+  if (session && session.proc.exitCode !== null) {
+    return true;
+  }
+
+  // tmux-backed session: detect "[exited]" pane via pane_dead flag.
+  if (hasTmux()) {
+    const result = spawnSync(
+      "tmux",
+      [
+        "-L",
+        TMUX_SOCKET,
+        "list-panes",
+        "-t",
+        tmuxSessionName(taskId),
+        "-F",
+        "#{pane_dead}",
+      ],
+      { encoding: "utf-8" },
+    );
+
+    // Session no longer exists but we still have an in-memory handle -> stale/dead.
+    if (result.status !== 0) {
+      return !!session;
+    }
+
+    const paneStates = (result.stdout || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (paneStates.length === 0) return false;
+    return paneStates.every((state) => state === "1");
+  }
+
+  return false;
+}
+
+/**
  * Detach from session — kills the attach process but keeps the tmux session alive.
  * Used when switching tasks or exiting the app (sessions can be reattached later).
  */
