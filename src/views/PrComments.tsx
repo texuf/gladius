@@ -302,7 +302,7 @@ export function PrComments() {
           parts.push(formatThreadForPaste(item.value));
         }
       }
-      parts.push("\nPlease commit the changes when done.");
+      parts.push("\nPlease commit and push the changes when done.");
       returnToConsoleWithPrompt(parts.join("\n---\n\n"));
       return;
     }
