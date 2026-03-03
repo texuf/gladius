@@ -8,6 +8,7 @@ import {
   touchTask,
   createTask as dbCreateTask,
   reopenTask as dbReopenTask,
+  updateTask as dbUpdateTask,
 } from "../services/db.js";
 import { formatGitStatus } from "../services/git.js";
 import { generateLabel, deduplicateLabel } from "../utils/label.js";
@@ -26,6 +27,21 @@ function formatClosedDate(closedAt: string | null): string {
   if (!closedAt) return "";
   const d = new Date(closedAt);
   return `${SHORT_DAYS[d.getDay()]} ${SHORT_MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
+
+function stripResumeSuffix(label: string): string {
+  return label.replace(/-r\d+$/, "");
+}
+
+function buildReopenLabel(label: string, existingLabels: string[]): string {
+  const baseLabel = stripResumeSuffix(label);
+  let suffix = 2;
+  let candidate = `${baseLabel}-r${suffix}`;
+  while (existingLabels.includes(candidate)) {
+    suffix += 1;
+    candidate = `${baseLabel}-r${suffix}`;
+  }
+  return candidate;
 }
 
 export function TaskList() {
@@ -156,13 +172,22 @@ export function TaskList() {
     if (!activeRepo) return;
     setCreating(true);
     try {
-      const worktreePath = await createWorktree(activeRepo.path, task.label);
+      const existingLabels = tasks.map((t) => t.label);
+      const reopenedLabel = buildReopenLabel(task.label, existingLabels);
+      const reopenedBranch = `${BRANCH_PREFIX}/${reopenedLabel}`;
+      const worktreePath = await createWorktree(activeRepo.path, reopenedLabel);
       dbReopenTask(task.id, worktreePath);
+      dbUpdateTask(task.id, {
+        label: reopenedLabel,
+        branch_name: reopenedBranch,
+      });
       reloadTasks();
       const reopened = {
         ...task,
+        label: reopenedLabel,
         status: "active" as const,
         worktree_path: worktreePath,
+        branch_name: reopenedBranch,
         closed_at: null,
       };
       setActiveTask(reopened);
