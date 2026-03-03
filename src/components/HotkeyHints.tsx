@@ -111,6 +111,7 @@ export function HotkeyHints() {
         pr.unresolvedThreads === 0;
       const hasOpenPr = pr && pr.state === "open";
       const branch = activeTask && gitStatuses[activeTask.id]?.branch;
+      const changedFiles = activeTask ? (gitStatuses[activeTask.id]?.changedFiles || 0) : 0;
       const isMerged = pr && pr.state === "merged";
       const canCreatePr =
         !pr &&
@@ -119,6 +120,7 @@ export function HotkeyHints() {
         activeTask?.worktree_path;
       const behindMain = activeTask && gitStatuses[activeTask.id]?.behindMain;
       const rebaseHints = behindMain && behindMain > 0 && activeTask?.model ? ["gr Rebase"] : [];
+      const commitHints = changedFiles > 0 ? ["gc Commit"] : [];
       const towerHints = activeTask?.worktree_path ? ["b Tower"] : [];
       const cursorHints = activeTask?.worktree_path ? ["n Cursor"] : [];
       const openPrHints = hasOpenPr ? ["p View PR"] : [];
@@ -136,6 +138,7 @@ export function HotkeyHints() {
         ...createPrHints,
         ...clearPrHints,
         ...rebaseHints,
+        ...commitHints,
         ...prHints,
         ...mergeHints,
         "y Copy",

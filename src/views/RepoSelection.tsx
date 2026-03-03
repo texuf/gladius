@@ -274,7 +274,7 @@ export function RepoSelection() {
 
       <Box justifyContent="space-between" marginBottom={1}>
         <Text bold>Repos</Text>
-        <Text dimColor>Ctrl+N: New Project r: Refresh g: Project d: Delete</Text>
+        <Text dimColor>Ctrl+N: New Project r: Refresh g: Project d: Delete q: Quit</Text>
       </Box>
 
       {repos.length === 0 && !addingRepo && (

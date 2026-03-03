@@ -173,6 +173,49 @@ function parseCodexPromptFile(filePath: string): TaskPrompt | null {
   return latest;
 }
 
+function parseClaudePromptsFromFile(filePath: string): TaskPrompt[] {
+  const content = readFileSync(filePath, "utf8");
+  const lines = content.split("\n");
+  const prompts: TaskPrompt[] = [];
+
+  for (const line of lines) {
+    if (!line) continue;
+    const record = safeParseJson(line);
+    if (!record || record.type !== "user") continue;
+    if (record?.message?.role !== "user") continue;
+
+    const text = extractClaudeMessageText(record.message.content);
+    if (!text) continue;
+
+    const timestamp = String(record.timestamp || "");
+    prompts.push({ text, timestamp, source: "claude" });
+  }
+
+  return prompts;
+}
+
+function parseCodexPromptsFromFile(filePath: string): TaskPrompt[] {
+  const content = readFileSync(filePath, "utf8");
+  const lines = content.split("\n");
+  const prompts: TaskPrompt[] = [];
+
+  for (const line of lines) {
+    if (!line) continue;
+    const record = safeParseJson(line);
+    if (!record || record.type !== "response_item") continue;
+    const payload = record.payload;
+    if (!payload || payload.type !== "message" || payload.role !== "user") continue;
+
+    const text = extractCodexMessageText(payload.content);
+    if (!text) continue;
+
+    const timestamp = String(record.timestamp || "");
+    prompts.push({ text, timestamp, source: "codex" });
+  }
+
+  return prompts;
+}
+
 function parsePromptFileCached(
   filePath: string,
   parser: (path: string) => TaskPrompt | null,
@@ -292,4 +335,27 @@ export function getLatestTaskPrompt(task: Task): TaskPrompt | null {
     (a, b) => toTimestampMs(a.timestamp) - toTimestampMs(b.timestamp),
   );
   return candidates[candidates.length - 1];
+}
+
+export function getRecentTaskPrompts(task: Task, limit = 200): TaskPrompt[] {
+  const prompts: TaskPrompt[] = [];
+
+  const claudeFile = resolveClaudeSessionFile(task);
+  if (claudeFile) {
+    try {
+      prompts.push(...parseClaudePromptsFromFile(claudeFile));
+    } catch {}
+  }
+
+  const codexFile = resolveCodexSessionFile(task);
+  if (codexFile) {
+    try {
+      prompts.push(...parseCodexPromptsFromFile(codexFile));
+    } catch {}
+  }
+
+  if (prompts.length === 0) return [];
+  prompts.sort((a, b) => toTimestampMs(a.timestamp) - toTimestampMs(b.timestamp));
+  if (limit <= 0 || prompts.length <= limit) return prompts;
+  return prompts.slice(prompts.length - limit);
 }

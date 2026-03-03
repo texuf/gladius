@@ -7,6 +7,7 @@ import { TaskStatusPane } from "../components/TaskStatusPane.js";
 import { TerminalPane } from "../components/TerminalPane.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { processChord } from "../utils/keyboard.js";
+import { generateCommitMessage } from "../services/llm.js";
 import {
   fetchLatestMain,
   formatPrStatus,
@@ -16,12 +17,18 @@ import {
 import { refreshAllTaskStatuses } from "../services/taskStatus.js";
 import {
   closeTask as dbCloseTask,
+  getAppState,
   updateTask,
   getTasksForRepo,
 } from "../services/db.js";
 import { deleteWorktree } from "../services/worktree.js";
 import { destroySession, isSessionDead } from "../services/terminalManager.js";
 import { StatusDots } from "../components/StatusDots.js";
+import { getRecentTaskPrompts } from "../services/taskPrompt.js";
+
+const MAX_DIFF_CHARS = 120_000;
+const MAX_PROMPTS_CHARS = 40_000;
+const MAX_DESCRIPTION_CHARS = 4_000;
 
 export function TaskView() {
   const activeTask = useStore((s) => s.activeTask);
@@ -46,6 +53,8 @@ export function TaskView() {
   const copyMode = useStore((s) => s.copyMode);
   const setCopyMode = useStore((s) => s.setCopyMode);
   const [fetching, setFetching] = useState(false);
+  const [busyLabel, setBusyLabel] = useState("Fetching");
+  const [actionError, setActionError] = useState("");
 
   const markConsoleInteracted = (taskId: string) => {
     useStore.getState().markConsoleInteracted(taskId);
@@ -245,6 +254,8 @@ export function TaskView() {
     if (input === "r" && !key.super) {
       const taskId = activeTask?.id;
       const worktreePath = activeTask?.worktree_path;
+      setActionError("");
+      setBusyLabel("Fetching");
       setFetching(true);
       if (gitIntervalRef.current) clearInterval(gitIntervalRef.current);
       if (prIntervalRef.current) clearInterval(prIntervalRef.current);
@@ -360,10 +371,17 @@ export function TaskView() {
       if ((chord === "cl" || chord === "co") && !activeTask?.model) {
         const model = chord === "cl" ? "claude" : "codex";
         selectModel(model);
+        return;
       }
 
       if (chord === "gr" && activeTask?.worktree_path && activeTask?.model) {
         void handleRebase();
+        return;
+      }
+
+      const changedFiles = activeTask ? (gitStatuses[activeTask.id]?.changedFiles || 0) : 0;
+      if (chord === "gc" && activeTask?.worktree_path && changedFiles > 0) {
+        void handleGenerateCommit();
       }
     }
   });
@@ -434,6 +452,89 @@ export function TaskView() {
     } catch {}
   };
 
+  const handleGenerateCommit = async () => {
+    if (!activeTask?.worktree_path) return;
+
+    const repoPath = activeTask.worktree_path;
+    setActionError("");
+    setBusyLabel("Committing");
+    setFetching(true);
+
+    try {
+      const apiKey = getAppState("settings.openai_api_key");
+      if (!apiKey) {
+        setActionError("OpenAI API key not set. Press 's' in Repo Selection to open Settings.");
+        return;
+      }
+
+      const status = await getGitStatus(repoPath);
+      if (status.changedFiles <= 0) {
+        setActionError("No uncommitted files.");
+        return;
+      }
+
+      const [unstagedNameOnly, stagedNameOnly, unstagedDiff, stagedDiff] =
+        await Promise.all([
+          $`git -C ${repoPath} diff --name-only --`.text(),
+          $`git -C ${repoPath} diff --cached --name-only --`.text(),
+          $`git -C ${repoPath} diff --`.text(),
+          $`git -C ${repoPath} diff --cached --`.text(),
+        ]);
+
+      const trackedFiles = new Set(
+        [...unstagedNameOnly.split("\n"), ...stagedNameOnly.split("\n")]
+          .map((line) => line.trim())
+          .filter(Boolean),
+      );
+      if (trackedFiles.size === 0) {
+        setActionError("Only untracked files are changed; gc uses git commit -am.");
+        return;
+      }
+
+      const diffSections: string[] = [];
+      if (stagedDiff.trim()) diffSections.push(`### Staged diff\n${stagedDiff.trim()}`);
+      if (unstagedDiff.trim()) diffSections.push(`### Unstaged diff\n${unstagedDiff.trim()}`);
+      const combinedDiff = diffSections.join("\n\n");
+      const boundedDiff = combinedDiff.length > MAX_DIFF_CHARS
+        ? `${combinedDiff.slice(0, MAX_DIFF_CHARS)}\n\n[diff truncated]`
+        : combinedDiff;
+
+      const recentPrompts = getRecentTaskPrompts(activeTask, 300);
+      const promptLines: string[] = [];
+      let promptChars = 0;
+      for (let i = recentPrompts.length - 1; i >= 0; i--) {
+        const prompt = recentPrompts[i];
+        const line =
+          `[${prompt.source} ${prompt.timestamp || "unknown"}] ${prompt.text}`;
+        if (promptChars + line.length > MAX_PROMPTS_CHARS) break;
+        promptLines.unshift(line);
+        promptChars += line.length;
+      }
+
+      const description = (activeTask.description || "").trim();
+      const boundedDescription = description.length > MAX_DESCRIPTION_CHARS
+        ? description.slice(0, MAX_DESCRIPTION_CHARS)
+        : description;
+
+      const commitMsg = await generateCommitMessage(
+        apiKey,
+        boundedDescription,
+        promptLines.join("\n"),
+        boundedDiff,
+      );
+
+      await $`git -C ${repoPath} commit -am ${commitMsg}`;
+      await pollGit();
+      await pollPr(true);
+    } catch (e: any) {
+      const stderr = e?.stderr?.toString?.()?.trim?.();
+      setActionError(stderr || e?.message || "Auto-commit failed");
+    } finally {
+      setFetching(false);
+      setBusyLabel("Fetching");
+    }
+  };
+
   const handleCloseTask = () => {
     if (!activeTask || !activeRepo) return;
     // Mark as closing immediately and navigate away
@@ -498,7 +599,7 @@ export function TaskView() {
             </Text>
           )}
           {fetching ? (
-            <Text dimColor> Fetching...</Text>
+            <Text dimColor> {busyLabel}...</Text>
           ) : (
             <>
               {gitStatus && (
@@ -570,6 +671,12 @@ export function TaskView() {
           )}
         </Box>
       </Box>
+
+      {actionError && (
+        <Box marginBottom={1}>
+          <Text color="red">{actionError}</Text>
+        </Box>
+      )}
 
       {/* Notes Pane (20%) */}
       <NotesPane />
