@@ -82,12 +82,21 @@ ${diffStat}`;
   };
 }
 
-function normalizeSingleLine(text: string): string {
-  const line = text
-    .split(/\r?\n/)
-    .map((part) => part.trim())
-    .find((part) => part.length > 0) || "";
-  return line.replace(/^["'`]+|["'`]+$/g, "").trim();
+function normalizeCommitMessage(text: string): string {
+  const cleaned = text.replace(/\r/g, "").trim();
+  if (!cleaned) return "";
+
+  const lines = cleaned
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line, i, arr) => {
+      // Collapse extra blank lines while preserving paragraph breaks.
+      if (line.length > 0) return true;
+      return i > 0 && arr[i - 1].length > 0;
+    });
+
+  const trimmed = lines.slice(0, 20).join("\n").trim();
+  return trimmed.replace(/^["'`]+|["'`]+$/g, "").trim();
 }
 
 /**
@@ -99,9 +108,13 @@ export async function generateCommitMessage(
   recentPrompts: string,
   diffText: string,
 ): Promise<string> {
-  const prompt = `You write Git commit subjects.
-Return EXACTLY one line, no prefix/suffix, no quotes, no markdown.
-Style: extremely terse and professional. Imperative mood. Max 72 chars.
+  const prompt = `You write Git commit messages.
+Return plain text only (no quotes, no markdown, no backticks).
+Style: extremely terse and professional.
+Use 2-20 lines total:
+- Line 1: imperative subject, <=72 chars.
+- Then a blank line.
+- Then concise bullet lines starting with "- ".
 
 Task description:
 ${taskDescription || "[none]"}
@@ -112,29 +125,45 @@ ${recentPrompts || "[none]"}
 Git diff:
 ${diffText || "[none]"}`;
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-5-nano",
-      max_completion_tokens: 80,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
+  const requestMessage = async (promptText: string): Promise<string> => {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4.1-nano",
+        max_tokens: 220,
+        messages: [{ role: "user", content: promptText }],
+      }),
+    });
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`OpenAI API error (${response.status}): ${err}`);
-  }
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`OpenAI API error (${response.status}): ${err}`);
+    }
 
-  const data = (await response.json()) as {
-    choices: Array<{ message: { content: string } }>;
+    const data = (await response.json()) as {
+      choices: Array<{ message: { content: string } }>;
+    };
+    return data.choices[0]?.message?.content || "";
   };
-  const content = data.choices[0]?.message?.content || "";
-  const message = normalizeSingleLine(content);
-  if (!message) return "Update changes";
-  return message.length > 72 ? message.slice(0, 72).trimEnd() : message;
+
+  const content = await requestMessage(prompt);
+  let message = normalizeCommitMessage(content);
+  if (!message) {
+    const retryPrompt = `${prompt}\n\nIMPORTANT: Your prior output was empty. Respond with a non-empty commit message now.`;
+    message = normalizeCommitMessage(await requestMessage(retryPrompt));
+  }
+  if (!message) {
+    const terseDescription = taskDescription
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 60);
+    return terseDescription
+      ? `Update ${terseDescription}`.slice(0, 72).trimEnd()
+      : "Update implementation details";
+  }
+  return message;
 }

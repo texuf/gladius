@@ -29,6 +29,7 @@ import { getRecentTaskPrompts } from "../services/taskPrompt.js";
 const MAX_DIFF_CHARS = 120_000;
 const MAX_PROMPTS_CHARS = 40_000;
 const MAX_DESCRIPTION_CHARS = 4_000;
+const MAX_UNTRACKED_FILES_IN_PROMPT = 20;
 
 export function TaskView() {
   const activeTask = useStore((s) => s.activeTask);
@@ -473,16 +474,16 @@ export function TaskView() {
         return;
       }
 
-      const [unstagedNameOnly, stagedNameOnly, unstagedDiff, stagedDiff] =
-        await Promise.all([
-          $`git -C ${repoPath} diff --name-only --`.text(),
-          $`git -C ${repoPath} diff --cached --name-only --`.text(),
-          $`git -C ${repoPath} diff --`.text(),
-          $`git -C ${repoPath} diff --cached --`.text(),
-        ]);
+      const [trackedNameOnly, trackedDiff, untrackedNameOnly] = await Promise.all([
+        // HEAD diff includes both staged and unstaged tracked changes.
+        $`git -C ${repoPath} diff --name-only HEAD --`.text(),
+        $`git -C ${repoPath} diff HEAD --`.text(),
+        $`git -C ${repoPath} ls-files --others --exclude-standard`.text(),
+      ]);
 
       const trackedFiles = new Set(
-        [...unstagedNameOnly.split("\n"), ...stagedNameOnly.split("\n")]
+        trackedNameOnly
+          .split("\n")
           .map((line) => line.trim())
           .filter(Boolean),
       );
@@ -492,8 +493,33 @@ export function TaskView() {
       }
 
       const diffSections: string[] = [];
-      if (stagedDiff.trim()) diffSections.push(`### Staged diff\n${stagedDiff.trim()}`);
-      if (unstagedDiff.trim()) diffSections.push(`### Unstaged diff\n${unstagedDiff.trim()}`);
+      if (trackedDiff.trim()) {
+        diffSections.push(`### Tracked diff (HEAD..working tree)\n${trackedDiff.trim()}`);
+      }
+
+      const untrackedFiles = untrackedNameOnly
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      if (untrackedFiles.length > 0) {
+        const patches: string[] = [];
+        for (const relPath of untrackedFiles.slice(0, MAX_UNTRACKED_FILES_IN_PROMPT)) {
+          try {
+            const patch =
+              await $`git -C ${repoPath} diff --no-index -- /dev/null ${relPath}`.text();
+            if (patch.trim()) patches.push(patch.trim());
+          } catch {}
+        }
+        if (patches.length > 0) {
+          diffSections.push(`### Untracked file patches\n${patches.join("\n\n")}`);
+        }
+        if (untrackedFiles.length > MAX_UNTRACKED_FILES_IN_PROMPT) {
+          diffSections.push(
+            `[omitted ${untrackedFiles.length - MAX_UNTRACKED_FILES_IN_PROMPT} additional untracked files]`,
+          );
+        }
+      }
+
       const combinedDiff = diffSections.join("\n\n");
       const boundedDiff = combinedDiff.length > MAX_DIFF_CHARS
         ? `${combinedDiff.slice(0, MAX_DIFF_CHARS)}\n\n[diff truncated]`
