@@ -98,6 +98,22 @@ export function TaskList() {
     () => linearIssues.filter((issue) => !inProgressLinearIds.has(issue.id)),
     [linearIssues, inProgressLinearIds],
   );
+  const linearIdColumnWidth = useMemo(
+    () =>
+      Math.max(0, ...visibleLinearIssues.map((issue) => issue.id.length)),
+    [visibleLinearIssues],
+  );
+  const linearStatusColumnWidth = useMemo(
+    () =>
+      Math.max(
+        0,
+        ...visibleLinearIssues.map((issue) =>
+          `${issue.statusIcon ? `${issue.statusIcon} ` : ""}${issue.status}`.trim()
+            .length,
+        ),
+      ),
+    [visibleLinearIssues],
+  );
 
   const rows: TaskListRow[] = useMemo(
     () => [
@@ -390,6 +406,8 @@ export function TaskList() {
               const idx = rowIdx++;
               const isSelected = idx === selectedIndex;
               const status = `${issue.statusIcon ? `${issue.statusIcon} ` : ""}${issue.status}`.trim();
+              const idCol = issue.id.padEnd(linearIdColumnWidth);
+              const statusCol = status.padEnd(linearStatusColumnWidth);
               return (
                 <Box key={issue.id} paddingLeft={1}>
                   <Text
@@ -397,9 +415,11 @@ export function TaskList() {
                     bold={isSelected}
                   >
                     {isSelected ? " ▸ " : "   "}
-                    {issue.id}
-                    {status ? `  ${status}` : ""}
-                    {`  ${issue.title}`}
+                    {idCol}
+                    {"  "}
+                    {statusCol}
+                    {"  "}
+                    {issue.title}
                   </Text>
                 </Box>
               );

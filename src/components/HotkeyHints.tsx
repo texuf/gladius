@@ -87,7 +87,7 @@ export function HotkeyHints() {
       "↑↓ Navigate",
       "⇧↑↓ Reorder",
       "⏎ Open",
-      ...(showLinearIssueHotkey ? ["p Open Issue"] : []),
+      ...(showLinearIssueHotkey ? ["p View Issue"] : []),
       "x Close",
       "Ctrl+N New",
       "^A Adopt",
