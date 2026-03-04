@@ -97,7 +97,7 @@ export function watchForClaudeSessionId(
  * for rollout-*-<uuid>.jsonl files.
  */
 export function watchForCodexSessionId(
-  callback: (sessionId: string) => void
+  callback: (sessionId: string) => void,
 ): () => void {
   const now = new Date();
   const year = String(now.getFullYear());
@@ -148,16 +148,13 @@ export function buildLlmCommand(
   model: "claude" | "codex",
   sessionId?: string | null,
   cwd?: string,
-  startupPrompt?: string,
 ): string[] {
-  const prompt = startupPrompt?.trim();
-
   if (model === "claude") {
     if (sessionId) return ["claude", "--resume", sessionId];
-    return prompt ? ["claude", prompt] : ["claude"];
+    return ["claude"];
   }
   // codex — needs explicit -C <dir> to set working root
   const base = cwd ? ["codex", "-C", cwd] : ["codex"];
   if (sessionId) return ["codex", "resume", sessionId];
-  return prompt ? [...base, "--", prompt] : base;
+  return base;
 }

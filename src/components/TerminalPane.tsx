@@ -2,8 +2,12 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Box, Text } from "ink";
 import { useStore } from "../store/index.js";
 import { EmbeddedTerminal } from "./EmbeddedTerminal.js";
-import { buildLlmCommand, watchForClaudeSessionId, watchForCodexSessionId } from "../services/sessionCapture.js";
-import { getSession } from "../services/terminalManager.js";
+import {
+  buildLlmCommand,
+  watchForClaudeSessionId,
+  watchForCodexSessionId,
+} from "../services/sessionCapture.js";
+import { getSession, writeToSession } from "../services/terminalManager.js";
 import { getProjectLinearTeam, updateTask } from "../services/db.js";
 import { getLinearIssueContext } from "../services/linear.js";
 
@@ -40,7 +44,8 @@ function getConsoleDimensions(layout: "task" | "project") {
   const totalCols = process.stdout.columns || 80;
   const taskReservedRows = 2 + 4 + 4 + 13 + PANE_CHROME_ROWS + 2;
   const projectReservedRows = 2 + 5 + 13 + PANE_CHROME_ROWS + 2;
-  const reservedRows = layout === "task" ? taskReservedRows : projectReservedRows;
+  const reservedRows =
+    layout === "task" ? taskReservedRows : projectReservedRows;
   const ptyRows = Math.max(6, totalRows - reservedRows);
   const ptyCols = Math.max(40, totalCols - PANE_CHROME_COLS - 2);
   return { ptyRows, ptyCols };
@@ -73,9 +78,7 @@ export function TerminalPane({
   const seededLinearTaskIdsRef = useRef<Set<string>>(new Set());
 
   const isTaskScoped =
-    workspaceId === undefined &&
-    cwd === undefined &&
-    model === undefined;
+    workspaceId === undefined && cwd === undefined && model === undefined;
   const effectiveWorkspaceId = workspaceId ?? activeTask?.id ?? "";
   const effectiveCwd = cwd ?? activeTask?.worktree_path ?? null;
   const effectiveModel = model ?? activeTask?.model ?? null;
@@ -117,7 +120,11 @@ export function TerminalPane({
       .then((context) => {
         if (cancelled) return;
         const prompt = context
-          ? ["Use this Linear issue as initial context for this task.", "", context].join("\n")
+          ? [
+              "Use this Linear issue as initial context for this task.",
+              "",
+              context,
+            ].join("\n")
           : "";
         setLinearStartupPrompt(prompt);
       })
@@ -128,28 +135,38 @@ export function TerminalPane({
     return () => {
       cancelled = true;
     };
-  }, [needsLinearStartupPrompt, activeTask?.id, effectiveCwd, activeRepo?.project_id]);
+  }, [
+    needsLinearStartupPrompt,
+    activeTask?.id,
+    effectiveCwd,
+    activeRepo?.project_id,
+  ]);
 
-  const modelLabel = type === "console" && effectiveModel ? ` (${effectiveModel})` : "";
+  const modelLabel =
+    type === "console" && effectiveModel ? ` (${effectiveModel})` : "";
 
-  const canEmbed = type === "terminal"
-    ? !!effectiveCwd
-    : !!(effectiveModel && effectiveCwd) &&
+  const canEmbed =
+    type === "terminal"
+      ? !!effectiveCwd
+      : !!(effectiveModel && effectiveCwd) &&
         (!needsLinearStartupPrompt || !linearPromptLoading);
 
   const dims = canEmbed
-    ? (type === "terminal" ? getTerminalDimensions() : null)
+    ? type === "terminal"
+      ? getTerminalDimensions()
+      : null
     : null;
-  const consoleDims = canEmbed && type === "console" ? getConsoleDimensions(layout) : null;
+  const consoleDims =
+    canEmbed && type === "console" ? getConsoleDimensions(layout) : null;
 
-  const command = type === "console" && effectiveModel
-    ? buildLlmCommand(
-        effectiveModel,
-        effectiveSessionId,
-        effectiveCwd ?? undefined,
-        needsLinearStartupPrompt ? (linearStartupPrompt ?? "") : undefined,
-      )
-    : undefined;
+  const command =
+    type === "console" && effectiveModel
+      ? buildLlmCommand(
+          effectiveModel,
+          effectiveSessionId,
+          effectiveCwd ?? undefined,
+        )
+      : undefined;
 
   // Session ID capture for console pane — runs whenever session ID is missing
   useEffect(() => {
@@ -167,19 +184,32 @@ export function TerminalPane({
     if (
       (activeTask.model === "claude" && activeTask.claude_session_id) ||
       (activeTask.model === "codex" && activeTask.codex_session_id)
-    ) return;
+    )
+      return;
 
     const onCapture = (sessionId: string) => {
       if (activeTask.model === "claude") {
         const updates = { claude_session_id: sessionId };
         updateTask(activeTask.id, updates);
         setActiveTask({ ...activeTask, ...updates });
-        setTasks(useStore.getState().tasks.map((t) => t.id === activeTask.id ? { ...t, ...updates } : t));
+        setTasks(
+          useStore
+            .getState()
+            .tasks.map((t) =>
+              t.id === activeTask.id ? { ...t, ...updates } : t,
+            ),
+        );
       } else {
         const updates = { codex_session_id: sessionId };
         updateTask(activeTask.id, updates);
         setActiveTask({ ...activeTask, ...updates });
-        setTasks(useStore.getState().tasks.map((t) => t.id === activeTask.id ? { ...t, ...updates } : t));
+        setTasks(
+          useStore
+            .getState()
+            .tasks.map((t) =>
+              t.id === activeTask.id ? { ...t, ...updates } : t,
+            ),
+        );
       }
     };
 
@@ -189,7 +219,11 @@ export function TerminalPane({
     const backfill = !!session && !session.isNew;
 
     if (activeTask.model === "claude") {
-      captureCleanupRef.current = watchForClaudeSessionId(activeTask.worktree_path!, onCapture, backfill);
+      captureCleanupRef.current = watchForClaudeSessionId(
+        activeTask.worktree_path!,
+        onCapture,
+        backfill,
+      );
     } else if (activeTask.model === "codex") {
       captureCleanupRef.current = watchForCodexSessionId(onCapture);
     }
@@ -209,20 +243,22 @@ export function TerminalPane({
     type,
   ]);
 
-  const placeholderText = type === "console"
-    ? (effectiveModel
-      ? needsLinearStartupPrompt && linearPromptLoading
-        ? "Loading Linear issue context..."
-        : "[No worktree — create one first]"
-      : "Press cl (Claude) or co (Codex) to start")
-    : "[No worktree — create one first]";
+  const placeholderText =
+    type === "console"
+      ? effectiveModel
+        ? needsLinearStartupPrompt && linearPromptLoading
+          ? "Loading Linear issue context..."
+          : "[No worktree — create one first]"
+        : "Press cl (Claude) or co (Codex) to start"
+      : "[No worktree — create one first]";
 
   const embeddedTaskId = effectiveWorkspaceId
     ? `${effectiveWorkspaceId}-${type}`
     : "";
-  const embeddedKey = type === "console"
-    ? `${embeddedTaskId}-${effectiveModel ?? "none"}`
-    : embeddedTaskId;
+  const embeddedKey =
+    type === "console"
+      ? `${embeddedTaskId}-${effectiveModel ?? "none"}`
+      : embeddedTaskId;
 
   const handleSessionReady = useCallback(
     async (isNewSession: boolean) => {
@@ -240,20 +276,33 @@ export function TerminalPane({
       if (seededLinearTaskIdsRef.current.has(activeTask.id)) return;
       seededLinearTaskIdsRef.current.add(activeTask.id);
 
+      const prompt = linearStartupPrompt?.trim();
+      if (prompt) {
+        const sessionKey = `${activeTask.id}-console`;
+        const promptText = `${prompt}\n`;
+        // Send prompt shortly after process startup to avoid shell/argv edge cases.
+        setTimeout(() => {
+          writeToSession(sessionKey, promptText);
+        }, 1200);
+      }
+
       const startedAt = new Date().toISOString();
       const updates = { linear_issue_started_at: startedAt };
 
       updateTask(activeTask.id, updates);
       setActiveTask({ ...activeTask, ...updates });
       setTasks(
-        useStore.getState().tasks.map((t) =>
-          t.id === activeTask.id ? { ...t, ...updates } : t,
-        ),
+        useStore
+          .getState()
+          .tasks.map((t) =>
+            t.id === activeTask.id ? { ...t, ...updates } : t,
+          ),
       );
     },
     [
       activeTask,
       isTaskScoped,
+      linearStartupPrompt,
       setActiveTask,
       setTasks,
       type,
@@ -268,11 +317,18 @@ export function TerminalPane({
       paddingX={1}
       width="100%"
       flexGrow={type === "console" ? 1 : 0}
-      height={canEmbed && type === "terminal" ? dims!.paneRows : type === "terminal" ? 5 : undefined}
+      height={
+        canEmbed && type === "terminal"
+          ? dims!.paneRows
+          : type === "terminal"
+            ? 5
+            : undefined
+      }
     >
       <Box justifyContent="space-between">
         <Text bold color={isFocused ? "green" : undefined}>
-          {label}{modelLabel}
+          {label}
+          {modelLabel}
         </Text>
         <Text dimColor>{focusKey}: focus</Text>
       </Box>
@@ -306,7 +362,9 @@ export function TerminalPane({
           ) : (
             <Text dimColor>
               {type === "console"
-                ? (effectiveModel ? "Press c to focus  (l/o: switch model)" : "cl: claude / co: codex")
+                ? effectiveModel
+                  ? "Press c to focus  (l/o: switch model)"
+                  : "cl: claude / co: codex"
                 : `Press ${focusKey} to focus`}
             </Text>
           )}

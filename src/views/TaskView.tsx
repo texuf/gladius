@@ -275,27 +275,52 @@ export function TaskView() {
     });
   };
 
-  const openGitMenu = () => {
+  const openGitMenu = async () => {
     const hasWorktree = !!activeTask?.worktree_path;
     const gitStatus = activeTask ? gitStatuses[activeTask.id] : undefined;
     const pr = gitStatus?.pr ?? null;
     const branch = gitStatus?.branch ?? "";
-    const hasTracking = !!gitStatus?.hasTrackingBranch;
-    const ahead = gitStatus?.ahead ?? 0;
-    const behind = gitStatus?.behind ?? 0;
     const changedFiles = gitStatus?.changedFiles ?? 0;
     const behindMain = gitStatus?.behindMain ?? 0;
 
     const isNonMainBranch =
       branch !== "main" && branch !== "master" && branch.length > 0;
-    const localMatchesRemote = hasTracking && ahead === 0 && behind === 0;
+    let remoteBranchExists = false;
+    let aheadRemote = 0;
+    let behindRemote = 0;
+    if (hasWorktree && isNonMainBranch && activeTask?.worktree_path) {
+      try {
+        await $`git -C ${activeTask.worktree_path} rev-parse --verify --quiet refs/remotes/origin/${branch}`.text();
+        remoteBranchExists = true;
+      } catch {}
+
+      if (remoteBranchExists) {
+        try {
+          const revList =
+            await $`git -C ${activeTask.worktree_path} rev-list --left-right --count ${branch}...origin/${branch} 2>/dev/null`.text();
+          const parts = revList.trim().split(/\s+/);
+          if (parts.length === 2) {
+            aheadRemote = parseInt(parts[0], 10) || 0;
+            behindRemote = parseInt(parts[1], 10) || 0;
+          }
+        } catch {}
+      }
+    }
+
+    const localMatchesRemote =
+      remoteBranchExists && aheadRemote === 0 && behindRemote === 0;
     const canCreatePr =
       hasWorktree &&
       !pr &&
       isNonMainBranch &&
-      (!hasTracking || localMatchesRemote);
-    const canPush = hasWorktree && hasTracking && ahead > 0 && behind === 0;
-    const canForcePush = hasWorktree && hasTracking && ahead > 0 && behind > 0;
+      (!remoteBranchExists || localMatchesRemote);
+    const canPush =
+      hasWorktree &&
+      remoteBranchExists &&
+      aheadRemote > 0 &&
+      behindRemote === 0;
+    const canForcePush =
+      hasWorktree && remoteBranchExists && aheadRemote > 0 && behindRemote > 0;
 
     const primaryLabel = canForcePush
       ? "Force push"
@@ -428,7 +453,7 @@ export function TaskView() {
     }
 
     if (input === "g" && !key.super) {
-      openGitMenu();
+      void openGitMenu();
       return;
     }
 
