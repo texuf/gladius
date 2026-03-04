@@ -550,7 +550,7 @@ export function TaskView() {
         boundedDiff,
       );
 
-      await $`git -C ${repoPath} commit -am ${commitMsg}`;
+      await $`git -C ${repoPath} commit -am ${commitMsg}`.text();
       const [commitSha, branch] = await Promise.all([
         $`git -C ${repoPath} rev-parse --short HEAD`.text(),
         $`git -C ${repoPath} rev-parse --abbrev-ref HEAD`.text(),

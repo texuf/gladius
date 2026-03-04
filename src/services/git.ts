@@ -863,8 +863,8 @@ export async function stageAndCommit(
   repoPath: string,
   message: string,
 ): Promise<void> {
-  await $`git -C ${repoPath} add .`;
-  await $`git -C ${repoPath} commit -m ${message}`;
+  await $`git -C ${repoPath} add .`.text();
+  await $`git -C ${repoPath} commit -m ${message}`.text();
 }
 
 /**
@@ -874,7 +874,7 @@ export async function pushBranch(
   repoPath: string,
   branchName: string,
 ): Promise<void> {
-  await $`git -C ${repoPath} push -u origin ${branchName}`;
+  await $`git -C ${repoPath} push -u origin ${branchName}`.text();
 }
 
 /**
