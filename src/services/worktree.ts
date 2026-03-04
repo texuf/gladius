@@ -12,7 +12,7 @@ import { BRANCH_PREFIX } from "../utils/constants.js";
  */
 export async function createWorktree(
   projectPath: string,
-  label: string
+  label: string,
 ): Promise<string> {
   const branchName = `${BRANCH_PREFIX}/${label}`;
   const projectName = basename(projectPath);
@@ -26,16 +26,28 @@ export async function createWorktree(
 
   // Fetch latest and resolve main branch
   await $`git -C ${projectPath} fetch origin`.quiet().nothrow();
-  const mainBranch = await $`git -C ${projectPath} symbolic-ref refs/remotes/origin/HEAD`.quiet().text()
-    .then((ref) => ref.trim().replace("refs/remotes/origin/", ""))
-    .catch(() => "main");
+  const mainBranch =
+    await $`git -C ${projectPath} symbolic-ref refs/remotes/origin/HEAD`
+      .quiet()
+      .text()
+      .then((ref) => ref.trim().replace("refs/remotes/origin/", ""))
+      .catch(() => "main");
 
   // Create worktree — reuse existing branch or create new from origin/main
-  const branchExists = await $`git -C ${projectPath} rev-parse --verify ${branchName}`.quiet().then(() => true, () => false);
+  const branchExists =
+    await $`git -C ${projectPath} rev-parse --verify ${branchName}`
+      .quiet()
+      .then(
+        () => true,
+        () => false,
+      );
   if (branchExists) {
     await $`git -C ${projectPath} worktree add ${worktreePath} ${branchName}`;
   } else {
-    await $`git -C ${projectPath} worktree add ${worktreePath} -b ${branchName} origin/${mainBranch}`;
+    // Create new task branch without upstream tracking. Tracking should only be
+    // configured once we explicitly push a remote branch.
+    await $`git -C ${projectPath} branch --no-track ${branchName} origin/${mainBranch}`;
+    await $`git -C ${projectPath} worktree add ${worktreePath} ${branchName}`;
   }
 
   // Copy .env files that are gitignored (secrets only, not tracked .env.example etc.)
@@ -64,8 +76,13 @@ export async function adoptBranch(
 
   await $`git -C ${projectPath} fetch origin`.quiet().nothrow();
 
-  const localExists = await $`git -C ${projectPath} rev-parse --verify ${remoteBranch}`
-    .quiet().then(() => true, () => false);
+  const localExists =
+    await $`git -C ${projectPath} rev-parse --verify ${remoteBranch}`
+      .quiet()
+      .then(
+        () => true,
+        () => false,
+      );
 
   if (localExists) {
     await $`git -C ${projectPath} worktree add ${worktreePath} ${remoteBranch}`;
@@ -83,7 +100,7 @@ export async function adoptBranch(
 export async function deleteWorktree(
   projectPath: string,
   worktreePath: string,
-  branchName?: string | null
+  branchName?: string | null,
 ): Promise<void> {
   try {
     await $`git -C ${projectPath} worktree remove ${worktreePath} --force`;
@@ -115,7 +132,10 @@ async function copyIgnoredEnvFiles(src: string, dest: string) {
   // Ask git which of these files are ignored
   const relativePaths = files.map((f) => f.slice(src.length + 1));
   try {
-    const result = await $`git -C ${src} check-ignore ${relativePaths}`.quiet().nothrow().text();
+    const result = await $`git -C ${src} check-ignore ${relativePaths}`
+      .quiet()
+      .nothrow()
+      .text();
     const ignored = new Set(result.trim().split("\n").filter(Boolean));
 
     for (const rel of relativePaths) {
