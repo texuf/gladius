@@ -7,7 +7,7 @@ import { TaskStatusPane } from "../components/TaskStatusPane.js";
 import { TerminalPane } from "../components/TerminalPane.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { processChord } from "../utils/keyboard.js";
-import { generateCommitMessage } from "../services/llm.js";
+import { COMMIT_MESSAGE_MODEL, generateCommitMessage } from "../services/llm.js";
 import {
   fetchLatestMain,
   formatPrStatus,
@@ -16,6 +16,7 @@ import {
 } from "../services/git.js";
 import { refreshAllTaskStatuses } from "../services/taskStatus.js";
 import {
+  addTaskEvent,
   closeTask as dbCloseTask,
   getAppState,
   updateTask,
@@ -550,6 +551,20 @@ export function TaskView() {
       );
 
       await $`git -C ${repoPath} commit -am ${commitMsg}`;
+      const [commitSha, branch] = await Promise.all([
+        $`git -C ${repoPath} rev-parse --short HEAD`.text(),
+        $`git -C ${repoPath} rev-parse --abbrev-ref HEAD`.text(),
+      ]);
+      addTaskEvent(activeTask.id, "commit", {
+        action: "commit",
+        source: "gc",
+        model: COMMIT_MESSAGE_MODEL,
+        message: commitMsg,
+        commit_sha: commitSha.trim() || null,
+        branch: branch.trim() || null,
+        task_label: activeTask.label,
+        generated_at: new Date().toISOString(),
+      });
       await pollGit();
       await pollPr(true);
     } catch (e: any) {

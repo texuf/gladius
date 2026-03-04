@@ -37,7 +37,13 @@ export interface Task {
 export interface TaskEvent {
   id: string;
   task_id: string;
-  event_type: "created" | "started" | "paused" | "closed" | "reopened";
+  event_type:
+    | "created"
+    | "started"
+    | "paused"
+    | "closed"
+    | "reopened"
+    | "commit";
   metadata: string | null;
   created_at: string;
 }

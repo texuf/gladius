@@ -2,6 +2,7 @@ import {
   getAppState,
   setAppState,
   getTasksActiveDuringWindow,
+  getTaskEventsSince,
 } from "./db.js";
 import {
   getCommitsSinceOnBranch,
@@ -12,13 +13,37 @@ import {
 import type { MergedPr } from "./git.js";
 import { generateStandupSummary } from "./llm.js";
 import { useStore } from "../store/index.js";
-import type { PrStatus } from "../store/types.js";
+import type { PrStatus, TaskEvent } from "../store/types.js";
+
+const MAX_COMMIT_EVENTS_PER_TASK = 8;
+const MAX_COMMIT_MESSAGE_CHARS = 1_500;
+
+interface CommitEventMetadata {
+  action?: string;
+  source?: string;
+  model?: string;
+  message?: string;
+  commit_sha?: string | null;
+  branch?: string | null;
+  generated_at?: string;
+}
+
+export interface StandupCommitEvent {
+  action: string;
+  source: string | null;
+  model: string | null;
+  message: string;
+  commitSha: string | null;
+  branch: string | null;
+  createdAt: string;
+}
 
 export interface StandupTaskData {
   taskLabel: string;
   taskStatus: string;
   branchName: string | null;
   commits: string;
+  commitEvents: StandupCommitEvent[];
   prTitle: string | null;
   prBody: string | null;
   prStatus: string | null;
@@ -37,6 +62,46 @@ export function getStandupWindowStart(): string {
   const saved = getAppState("standup.last_generated_at");
   if (saved) return saved;
   return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+}
+
+function parseTaskEventMetadata(raw: string | null): CommitEventMetadata | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed as CommitEventMetadata;
+  } catch {
+    return null;
+  }
+}
+
+function toStandupCommitEvent(event: TaskEvent): StandupCommitEvent | null {
+  const metadata = parseTaskEventMetadata(event.metadata);
+  const action = String(metadata?.action || "").toLowerCase();
+  const isCommitEvent = event.event_type === "commit" || action === "commit";
+  if (!isCommitEvent) return null;
+
+  const message = String(metadata?.message || "").trim();
+  if (!message) return null;
+
+  return {
+    action: "commit",
+    source: metadata?.source ? String(metadata.source) : null,
+    model: metadata?.model ? String(metadata.model) : null,
+    message:
+      message.length > MAX_COMMIT_MESSAGE_CHARS
+        ? `${message.slice(0, MAX_COMMIT_MESSAGE_CHARS)}...`
+        : message,
+    commitSha:
+      metadata?.commit_sha !== undefined && metadata?.commit_sha !== null
+        ? String(metadata.commit_sha)
+        : null,
+    branch:
+      metadata?.branch !== undefined && metadata?.branch !== null
+        ? String(metadata.branch)
+        : null,
+    createdAt: event.created_at,
+  };
 }
 
 export async function gatherStandupData(): Promise<StandupProjectData[]> {
@@ -99,12 +164,17 @@ export async function gatherStandupData(): Promise<StandupProjectData[]> {
 
           const cachedPr: PrStatus | null = gitStatuses[task.id]?.pr ?? null;
           const prStatusStr = cachedPr ? formatPrStatus(cachedPr) : null;
+          const commitEvents = getTaskEventsSince(task.id, sinceISO)
+            .map((event) => toStandupCommitEvent(event))
+            .filter((event): event is StandupCommitEvent => event !== null)
+            .slice(-MAX_COMMIT_EVENTS_PER_TASK);
 
           return {
             taskLabel: task.label,
             taskStatus: task.status,
             branchName: task.branch_name,
             commits,
+            commitEvents,
             prTitle: matchedPr?.title ?? null,
             prBody: matchedPr?.body ?? null,
             prStatus: prStatusStr,
@@ -160,6 +230,23 @@ Time window: ${sinceISO} to now
       }
       prompt += `\n`;
       prompt += `  Commits: ${task.commits || "none yet"}\n`;
+      if (task.commitEvents.length > 0) {
+        prompt += "  Generated commit summaries:\n";
+        for (const event of task.commitEvents) {
+          const tags = [
+            event.createdAt ? `at ${event.createdAt}` : "",
+            event.commitSha ? `sha ${event.commitSha}` : "",
+            event.source ? `via ${event.source}` : "",
+            event.model ? `model ${event.model}` : "",
+          ]
+            .filter(Boolean)
+            .join(" | ");
+          prompt += `   - ${tags}\n`;
+          for (const line of event.message.split("\n")) {
+            prompt += `     ${line}\n`;
+          }
+        }
+      }
       if (task.prTitle) {
         prompt += `  Merged PR: ${task.prTitle}\n`;
         if (task.prBody) {

@@ -1,6 +1,8 @@
 /**
  * Generate a standup summary from a pre-built prompt using the OpenAI API.
  */
+export const COMMIT_MESSAGE_MODEL = "gpt-4.1-nano";
+
 export async function generateStandupSummary(
   apiKey: string,
   promptText: string,
@@ -133,7 +135,7 @@ ${diffText || "[none]"}`;
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4.1-nano",
+        model: COMMIT_MESSAGE_MODEL,
         max_tokens: 220,
         messages: [{ role: "user", content: promptText }],
       }),
