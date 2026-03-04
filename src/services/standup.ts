@@ -1,3 +1,4 @@
+import { $ } from "bun";
 import {
   getAppState,
   setAppState,
@@ -5,18 +6,21 @@ import {
   getTaskEventsSince,
 } from "./db.js";
 import {
+  getCommitsSince,
   getCommitsSinceOnBranch,
   getMergedPrsSince,
+  getPrsCreatedSince,
   getMainBranch,
   formatPrStatus,
 } from "./git.js";
-import type { MergedPr } from "./git.js";
+import type { MergedPr, OpenedPr } from "./git.js";
 import { generateStandupSummary } from "./llm.js";
 import { useStore } from "../store/index.js";
 import type { PrStatus, TaskEvent } from "../store/types.js";
 
 const MAX_COMMIT_EVENTS_PER_TASK = 8;
 const MAX_COMMIT_MESSAGE_CHARS = 1_500;
+const MAX_PR_BODY_CHARS = 500;
 
 interface CommitEventMetadata {
   action?: string;
@@ -39,29 +43,49 @@ export interface StandupCommitEvent {
 }
 
 export interface StandupTaskData {
-  taskLabel: string;
+  taskId: string; // internal short id (legacy "label")
+  taskDescription: string; // human-readable task label (legacy "description")
   taskStatus: string;
   branchName: string | null;
-  commits: string;
+  branchCommits: string;
   commitEvents: StandupCommitEvent[];
   prTitle: string | null;
   prBody: string | null;
+  prState: OpenedPr["state"] | null;
   prStatus: string | null;
 }
 
-export interface StandupProjectData {
+export interface StandupRepoData {
   projectName: string;
   repoName: string;
   repoPath: string;
   mainCommits: string;
+  authoredCommits: string;
+  openedPrs: OpenedPr[];
   mergedPrs: MergedPr[];
   tasks: StandupTaskData[];
 }
 
+export interface StandupProjectData {
+  projectName: string;
+  repos: StandupRepoData[];
+}
+
 export function getStandupWindowStart(): string {
   const saved = getAppState("standup.last_generated_at");
-  if (saved) return saved;
-  return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  if (!saved) return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const savedMs = Date.parse(saved);
+  if (!Number.isFinite(savedMs)) {
+    return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  }
+  return new Date(savedMs).toISOString();
+}
+
+function getStandupWindowDays(sinceISO: string): number {
+  const sinceMs = Date.parse(sinceISO);
+  if (!Number.isFinite(sinceMs)) return 1;
+  const deltaMs = Math.max(0, Date.now() - sinceMs);
+  return Math.max(1, Math.ceil(deltaMs / (24 * 60 * 60 * 1000)));
 }
 
 function parseTaskEventMetadata(raw: string | null): CommitEventMetadata | null {
@@ -104,6 +128,46 @@ function toStandupCommitEvent(event: TaskEvent): StandupCommitEvent | null {
   };
 }
 
+async function getRepoAuthorFilter(repoPath: string): Promise<string | null> {
+  try {
+    const email = (await $`git -C ${repoPath} config user.email`.text()).trim();
+    if (email) return email;
+  } catch {
+    // ignore
+  }
+  try {
+    const name = (await $`git -C ${repoPath} config user.name`.text()).trim();
+    if (name) return name;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function groupReposByProject(repos: StandupRepoData[]): StandupProjectData[] {
+  const byProject = new Map<string, StandupProjectData>();
+
+  for (const repo of repos) {
+    if (!byProject.has(repo.projectName)) {
+      byProject.set(repo.projectName, {
+        projectName: repo.projectName,
+        repos: [],
+      });
+    }
+    byProject.get(repo.projectName)!.repos.push(repo);
+  }
+
+  const projects = Array.from(byProject.values()).sort((a, b) =>
+    a.projectName.localeCompare(b.projectName),
+  );
+
+  for (const project of projects) {
+    project.repos.sort((a, b) => a.repoName.localeCompare(b.repoName));
+  }
+
+  return projects;
+}
+
 export async function gatherStandupData(): Promise<StandupProjectData[]> {
   const sinceISO = getStandupWindowStart();
   const tasks = getTasksActiveDuringWindow(sinceISO);
@@ -132,25 +196,41 @@ export async function gatherStandupData(): Promise<StandupProjectData[]> {
     repoMap.get(key)!.tasks.push(task);
   }
 
-  const results = await Promise.all(
+  const repoData = await Promise.all(
     Array.from(repoMap.values()).map(async (repo) => {
-      const mainBranch = await getMainBranch(repo.repoPath);
-
-      const [mainCommits, mergedPrs] = await Promise.all([
-        getCommitsSinceOnBranch(repo.repoPath, mainBranch, sinceISO),
-        getMergedPrsSince(repo.repoPath, sinceISO),
+      const [mainBranch, authorFilter] = await Promise.all([
+        getMainBranch(repo.repoPath),
+        getRepoAuthorFilter(repo.repoPath),
       ]);
 
-      const prByBranch = new Map<string, MergedPr>();
-      for (const pr of mergedPrs) {
-        if (pr.headRefName) {
+      const [mainCommits, authoredCommits, mergedPrs, openedPrs] =
+        await Promise.all([
+          getCommitsSinceOnBranch(repo.repoPath, mainBranch, sinceISO),
+          getCommitsSince(
+            repo.repoPath,
+            sinceISO,
+            authorFilter ? { author: authorFilter } : undefined,
+          ),
+          getMergedPrsSince(repo.repoPath, sinceISO, { author: "@me" }),
+          getPrsCreatedSince(repo.repoPath, sinceISO, { author: "@me" }),
+        ]);
+
+      const prByBranch = new Map<string, OpenedPr>();
+      for (const pr of openedPrs) {
+        if (!pr.headRefName) continue;
+        const existing = prByBranch.get(pr.headRefName);
+        const prCreatedAtMs = Date.parse(pr.createdAt || "") || 0;
+        const existingCreatedAtMs = existing
+          ? Date.parse(existing.createdAt || "") || 0
+          : 0;
+        if (!existing || prCreatedAtMs >= existingCreatedAtMs) {
           prByBranch.set(pr.headRefName, pr);
         }
       }
 
       const taskDataList = await Promise.all(
         repo.tasks.map(async (task) => {
-          const commits = task.branch_name
+          const branchCommits = task.branch_name
             ? await getCommitsSinceOnBranch(
                 repo.repoPath,
                 task.branch_name,
@@ -170,13 +250,15 @@ export async function gatherStandupData(): Promise<StandupProjectData[]> {
             .slice(-MAX_COMMIT_EVENTS_PER_TASK);
 
           return {
-            taskLabel: task.label,
+            taskId: task.label,
+            taskDescription: task.description,
             taskStatus: task.status,
             branchName: task.branch_name,
-            commits,
+            branchCommits,
             commitEvents,
             prTitle: matchedPr?.title ?? null,
             prBody: matchedPr?.body ?? null,
+            prState: matchedPr?.state ?? null,
             prStatus: prStatusStr,
           } satisfies StandupTaskData;
         }),
@@ -187,83 +269,150 @@ export async function gatherStandupData(): Promise<StandupProjectData[]> {
         repoName: repo.repoName,
         repoPath: repo.repoPath,
         mainCommits,
+        authoredCommits,
+        openedPrs,
         mergedPrs,
         tasks: taskDataList,
-      } satisfies StandupProjectData;
+      } satisfies StandupRepoData;
     }),
   );
 
-  return results;
+  return groupReposByProject(repoData);
 }
 
-export function buildStandupPrompt(data: StandupProjectData[]): string {
-  const sinceISO = getStandupWindowStart();
-  let prompt = `Summarize my work for a standup update. Be concise — one or two sentences per item. Group by project. No emojis. Plain text, not markdown.
+function truncate(text: string, maxChars = MAX_PR_BODY_CHARS): string {
+  return text.length > maxChars ? `${text.slice(0, maxChars)}...` : text;
+}
+
+function indentLines(text: string, prefix: string): string {
+  return text
+    .split("\n")
+    .map((line) => `${prefix}${line}`)
+    .join("\n");
+}
+
+function formatPrState(state: OpenedPr["state"]): string {
+  return state === "merged"
+    ? "MERGED"
+    : state === "closed"
+      ? "CLOSED"
+      : "OPEN";
+}
+
+function formatRepoTaskContext(task: StandupTaskData): string {
+  const description = task.taskDescription || "none";
+  const taskId = task.taskId || "none";
+  const branch = task.branchName || "none";
+
+  let block = `Task: ${description} (id: ${taskId}) | status: ${task.taskStatus} | branch: ${branch}\n`;
+  block += `Task branch commits in window:\n${task.branchCommits || "none"}\n`;
+
+  if (task.commitEvents.length > 0) {
+    block += "Commit notes captured by this app:\n";
+    for (const event of task.commitEvents) {
+      const tags = [
+        event.createdAt ? `at ${event.createdAt}` : "",
+        event.commitSha ? `sha ${event.commitSha}` : "",
+        event.source ? `via ${event.source}` : "",
+        event.model ? `model ${event.model}` : "",
+      ]
+        .filter(Boolean)
+        .join(" | ");
+      block += `- ${tags || "commit event"}\n`;
+      block += `${indentLines(event.message, "  ")}\n`;
+    }
+  }
+
+  if (task.prTitle) {
+    block += `Related PR on this task branch: ${task.prTitle}`;
+    if (task.prState) {
+      block += ` (state: ${formatPrState(task.prState)})`;
+    }
+    block += "\n";
+  }
+  if (task.prBody) {
+    block += `Related PR description:\n${truncate(task.prBody)}\n`;
+  }
+  if (task.prStatus) {
+    block += `Current PR status: ${task.prStatus}\n`;
+  }
+  return block;
+}
+
+export function buildStandupProjectPrompt(
+  project: StandupProjectData,
+  sinceISO = getStandupWindowStart(),
+): string {
+  const windowDays = getStandupWindowDays(sinceISO);
+  let prompt = `You are writing a standup update for exactly one project (which may contain multiple repositories).
+Audience: engineering coworkers who need to know what changed and what they should watch for.
+Output rules:
+- Plain text only. No markdown. No emojis.
+- Produce one standup update for this single project only.
+- Use 4-12 concise bullets total.
+- The first line must be: In the last ${windowDays} days:
+- Start every bullet in this exact plain-text format (no square brackets):
+  repo: <repo-name> | task: <task-description-or-none> | id: <task-id-or-none> | branch: <branch-or-none> - <update>
+- Never output "[" or "]" characters anywhere in the response.
+- Focus on what changed and what teammates should be aware of to do their jobs (behavior/API changes, schema/config shifts, rollout or migration risk, and required follow-up).
+- If there was no meaningful work, output exactly one bullet saying that.
 
 Time window: ${sinceISO} to now
+Project: ${project.projectName}
 `;
 
-  for (const repo of data) {
-    prompt += `\n=== ${repo.projectName} / ${repo.repoName} ===\n`;
+  for (const repo of project.repos) {
+    prompt += `\n=== Repo: ${repo.repoName} ===\n`;
 
-    if (repo.mainCommits) {
-      prompt += `\nRecent commits on main:\n${repo.mainCommits}\n`;
-    }
+    prompt += `\nAuthored commits in this window (all branches):\n${repo.authoredCommits || "none"}\n`;
 
-    if (repo.mergedPrs.length > 0) {
-      prompt += `\nMerged PRs:\n`;
-      for (const pr of repo.mergedPrs) {
-        prompt += `PR #${pr.number} (${pr.headRefName}): ${pr.title}\n`;
+    prompt += `\nCommits that landed on main in this window:\n${repo.mainCommits || "none"}\n`;
+
+    prompt += "\nPRs I opened in this window (all states):\n";
+    if (repo.openedPrs.length === 0) {
+      prompt += "none\n";
+    } else {
+      for (const pr of repo.openedPrs) {
+        prompt += `PR #${pr.number} ${formatPrState(pr.state)} (${pr.headRefName || "none"}) created ${pr.createdAt}: ${pr.title}\n`;
+        if (pr.mergedAt) {
+          prompt += `merged at ${pr.mergedAt}\n`;
+        }
         if (pr.body) {
-          const truncated =
-            pr.body.length > 500 ? pr.body.slice(0, 500) + "..." : pr.body;
-          prompt += `${truncated}\n`;
+          prompt += `${truncate(pr.body)}\n`;
         }
       }
     }
 
-    prompt += `\nActive tasks:\n`;
-    for (const task of repo.tasks) {
-      prompt += `- ${task.taskLabel} [${task.taskStatus}]`;
-      if (task.branchName) {
-        prompt += ` branch: ${task.branchName}`;
-      }
-      prompt += `\n`;
-      prompt += `  Commits: ${task.commits || "none yet"}\n`;
-      if (task.commitEvents.length > 0) {
-        prompt += "  Generated commit summaries:\n";
-        for (const event of task.commitEvents) {
-          const tags = [
-            event.createdAt ? `at ${event.createdAt}` : "",
-            event.commitSha ? `sha ${event.commitSha}` : "",
-            event.source ? `via ${event.source}` : "",
-            event.model ? `model ${event.model}` : "",
-          ]
-            .filter(Boolean)
-            .join(" | ");
-          prompt += `   - ${tags}\n`;
-          for (const line of event.message.split("\n")) {
-            prompt += `     ${line}\n`;
-          }
+    prompt += "\nPRs I merged in this window:\n";
+    if (repo.mergedPrs.length === 0) {
+      prompt += "none\n";
+    } else {
+      for (const pr of repo.mergedPrs) {
+        prompt += `PR #${pr.number} (${pr.headRefName || "none"}): ${pr.title}\n`;
+        if (pr.body) {
+          prompt += `${truncate(pr.body)}\n`;
         }
       }
-      if (task.prTitle) {
-        prompt += `  Merged PR: ${task.prTitle}\n`;
-        if (task.prBody) {
-          const truncated =
-            task.prBody.length > 500
-              ? task.prBody.slice(0, 500) + "..."
-              : task.prBody;
-          prompt += `  PR description: ${truncated}\n`;
-        }
-      }
-      if (task.prStatus) {
-        prompt += `  PR: ${task.prStatus}\n`;
+    }
+
+    prompt += "\nTasks in this repo (description first, id in parentheses):\n";
+    if (repo.tasks.length === 0) {
+      prompt += "none\n";
+    } else {
+      for (const task of repo.tasks) {
+        prompt += `\n${formatRepoTaskContext(task)}`;
       }
     }
   }
 
   return prompt;
+}
+
+export function buildStandupPrompt(data: StandupProjectData[]): string {
+  const sinceISO = getStandupWindowStart();
+  return data
+    .map((project) => buildStandupProjectPrompt(project, sinceISO))
+    .join("\n\n-----\n\n");
 }
 
 export async function generateStandup(apiKey: string): Promise<string> {
@@ -273,8 +422,18 @@ export async function generateStandup(apiKey: string): Promise<string> {
     return "No task activity found in the current time window.";
   }
 
-  const prompt = buildStandupPrompt(data);
-  const summary = await generateStandupSummary(apiKey, prompt);
+  const sinceISO = getStandupWindowStart();
+  const sections: string[] = [];
+
+  for (const project of data) {
+    const prompt = buildStandupProjectPrompt(project, sinceISO);
+    const projectSummary = (await generateStandupSummary(apiKey, prompt)).trim();
+    sections.push(
+      `${project.projectName}\n${projectSummary || "- No meaningful updates generated."}`,
+    );
+  }
+
+  const summary = sections.join("\n\n");
 
   const now = new Date().toISOString();
   setAppState("standup.last_generated_at", now);

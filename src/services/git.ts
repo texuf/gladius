@@ -918,10 +918,23 @@ export async function createPullRequest(
 export async function getCommitsSince(
   repoPath: string,
   sinceISO: string,
+  options?: { author?: string },
 ): Promise<string> {
   try {
+    const args = [
+      "-C",
+      repoPath,
+      "log",
+      "--all",
+      `--since=${sinceISO}`,
+      "--pretty=format:%h %s",
+    ];
+    const author = options?.author?.trim();
+    if (author) {
+      args.push(`--author=${author}`);
+    }
     return (
-      await $`git -C ${repoPath} log --all --since=${sinceISO} --pretty=format:%h %s`.text()
+      await $`git ${args}`.text()
     ).trim();
   } catch {
     return "";
@@ -953,27 +966,120 @@ export interface MergedPr {
   headRefName: string;
 }
 
+export interface OpenedPr {
+  number: number;
+  title: string;
+  body: string;
+  headRefName: string;
+  state: "open" | "closed" | "merged";
+  createdAt: string;
+  mergedAt: string | null;
+}
+
 /**
  * Get recently merged PRs since a given timestamp using gh CLI.
  */
 export async function getMergedPrsSince(
   repoPath: string,
   sinceISO: string,
+  options?: { author?: string },
 ): Promise<MergedPr[]> {
   try {
     const remoteUrl = (
       await $`git -C ${repoPath} remote get-url origin`.text()
     ).trim();
-    const raw =
-      await $`gh pr list --repo ${remoteUrl} --state merged --search ${"merged:>=" + sinceISO.slice(0, 10)} --json number,title,body,headRefName --limit 50`.text();
+    const args = [
+      "pr",
+      "list",
+      "--repo",
+      remoteUrl,
+      "--state",
+      "merged",
+      "--search",
+      `merged:>=${sinceISO.slice(0, 10)}`,
+      "--json",
+      "number,title,body,headRefName,mergedAt",
+      "--limit",
+      "50",
+    ];
+    const author = options?.author?.trim();
+    if (author) {
+      args.push("--author", author);
+    }
+
+    const raw = await $`gh ${args}`.text();
     const prs = JSON.parse(raw);
     if (!Array.isArray(prs)) return [];
-    return prs.map((pr: any) => ({
-      number: pr.number ?? 0,
-      title: pr.title ?? "",
-      body: pr.body ?? "",
-      headRefName: pr.headRefName ?? "",
-    }));
+    const sinceMs = Date.parse(sinceISO);
+    return prs
+      .filter((pr: any) => {
+        if (!Number.isFinite(sinceMs)) return true;
+        const mergedMs = Date.parse(String(pr?.mergedAt || ""));
+        if (!Number.isFinite(mergedMs)) return true;
+        return mergedMs >= sinceMs;
+      })
+      .map((pr: any) => ({
+        number: pr.number ?? 0,
+        title: pr.title ?? "",
+        body: pr.body ?? "",
+        headRefName: pr.headRefName ?? "",
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get PRs created in the time window (any state), optionally scoped to an author.
+ */
+export async function getPrsCreatedSince(
+  repoPath: string,
+  sinceISO: string,
+  options?: { author?: string },
+): Promise<OpenedPr[]> {
+  try {
+    const remoteUrl = (
+      await $`git -C ${repoPath} remote get-url origin`.text()
+    ).trim();
+    const args = [
+      "pr",
+      "list",
+      "--repo",
+      remoteUrl,
+      "--state",
+      "all",
+      "--search",
+      `created:>=${sinceISO.slice(0, 10)}`,
+      "--json",
+      "number,title,body,headRefName,state,createdAt,mergedAt",
+      "--limit",
+      "100",
+    ];
+    const author = options?.author?.trim();
+    if (author) {
+      args.push("--author", author);
+    }
+
+    const raw = await $`gh ${args}`.text();
+    const prs = JSON.parse(raw);
+    if (!Array.isArray(prs)) return [];
+    const sinceMs = Date.parse(sinceISO);
+    return prs
+      .filter((pr: any) => {
+        if (!Number.isFinite(sinceMs)) return true;
+        const createdMs = Date.parse(String(pr?.createdAt || ""));
+        if (!Number.isFinite(createdMs)) return false;
+        return createdMs >= sinceMs;
+      })
+      .map((pr: any) => ({
+        number: pr.number ?? 0,
+        title: pr.title ?? "",
+        body: pr.body ?? "",
+        headRefName: pr.headRefName ?? "",
+        state: normalizePrState(String(pr?.state || "")),
+        createdAt: pr.createdAt ?? "",
+        mergedAt: pr.mergedAt ?? null,
+      }));
   } catch {
     return [];
   }
