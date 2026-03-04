@@ -628,7 +628,12 @@ export function TaskView() {
             const patch =
               await $`git -C ${repoPath} diff --no-index -- /dev/null ${relPath}`.text();
             if (patch.trim()) patches.push(patch.trim());
-          } catch {}
+          } catch (e: any) {
+            // `git diff --no-index` exits 1 when differences exist; Bun throws
+            // on non-zero exit, but stdout still contains the patch we need.
+            const patch = e?.stdout?.toString?.() || "";
+            if (patch.trim()) patches.push(patch.trim());
+          }
         }
         if (patches.length > 0) {
           diffSections.push(
