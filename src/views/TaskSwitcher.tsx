@@ -22,6 +22,8 @@ export function TaskSwitcher() {
   const taskStatuses = useStore((s) => s.taskStatuses);
 
   const [allTasks, setAllTasks] = useState<TaskWithRepo[]>([]);
+  const truncateDescription = (description: string) =>
+    description.length > 30 ? `${description.slice(0, 30)}...` : description;
 
   useEffect(() => {
     const repos = getAllRepos();
@@ -151,11 +153,11 @@ export function TaskSwitcher() {
                   bold={idx === selectedIndex}
                 >
                   {idx === selectedIndex ? "▸ " : "  "}
-                  {task.label}
+                  {truncateDescription(task.description)}
                 </Text>
                 <Text dimColor>
-                  {" "}&quot;{task.description.slice(0, 30)}
-                  {task.description.length > 30 ? "..." : ""}&quot;
+                  {" "}
+                  {task.label}
                 </Text>
               </Box>
             );
@@ -187,11 +189,11 @@ export function TaskSwitcher() {
                   bold={idx === selectedIndex}
                 >
                   {idx === selectedIndex ? "▸ " : "  "}
-                  {task.repoName} / {task.label}
+                  {task.repoName} / {truncateDescription(task.description)}
                 </Text>
                 <Text dimColor>
-                  {" "}&quot;{task.description.slice(0, 30)}
-                  {task.description.length > 30 ? "..." : ""}&quot;
+                  {" "}
+                  {task.label}
                 </Text>
               </Box>
             );
