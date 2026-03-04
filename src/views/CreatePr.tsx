@@ -52,9 +52,13 @@ export function CreatePr() {
 
   // Reviewer state
   const [globalReviewers, setGlobalReviewers] = useState<Reviewer[]>([]);
-  const [selectedHandles, setSelectedHandles] = useState<Set<string>>(new Set());
+  const [selectedHandles, setSelectedHandles] = useState<Set<string>>(
+    new Set(),
+  );
   const [reviewerIndex, setReviewerIndex] = useState(0);
-  const [addingReviewer, setAddingReviewer] = useState<AddingReviewer | null>(null);
+  const [addingReviewer, setAddingReviewer] = useState<AddingReviewer | null>(
+    null,
+  );
   const [addName, setAddName] = useState("");
   const [addHandle, setAddHandle] = useState("");
 
@@ -120,7 +124,9 @@ export function CreatePr() {
     try {
       const apiKey = getAppState("settings.openai_api_key");
       if (!apiKey) {
-        setErrorMsg("OpenAI API key not set. Press 's' in Repo Selection to open Settings.");
+        setErrorMsg(
+          "OpenAI API key not set. Press 's' in Repo Selection to open Settings.",
+        );
         setPhase("error");
         return;
       }
@@ -143,9 +149,10 @@ export function CreatePr() {
       }
 
       const taskDescription = (activeTask?.description || "").trim();
-      const boundedTaskDescription = taskDescription.length > MAX_PR_DESCRIPTION_CHARS
-        ? `${taskDescription.slice(0, MAX_PR_DESCRIPTION_CHARS)}...`
-        : taskDescription;
+      const boundedTaskDescription =
+        taskDescription.length > MAX_PR_DESCRIPTION_CHARS
+          ? `${taskDescription.slice(0, MAX_PR_DESCRIPTION_CHARS)}...`
+          : taskDescription;
 
       const promptLines: string[] = [];
       let promptChars = 0;
@@ -155,8 +162,7 @@ export function CreatePr() {
         const recentPrompts = getRecentTaskPrompts(activeTask, 300);
         for (let i = recentPrompts.length - 1; i >= 0; i--) {
           const prompt = recentPrompts[i];
-          const line =
-            `[${prompt.source} ${prompt.timestamp || "unknown"}] ${prompt.text}`;
+          const line = `[${prompt.source} ${prompt.timestamp || "unknown"}] ${prompt.text}`;
           if (promptChars + line.length > MAX_PR_PROMPTS_CHARS) break;
           promptLines.unshift(line);
           promptChars += line.length;
@@ -191,9 +197,10 @@ export function CreatePr() {
 
       const fixesId = activeTask?.linear_issue_id?.trim() || "";
       const fixesLine = fixesId ? `fixes: ${fixesId}` : "";
-      const finalDescription = fixesLine && !description.includes(fixesLine)
-        ? `${description.trim()}\n\n${fixesLine}`
-        : description;
+      const finalDescription =
+        fixesLine && !description.includes(fixesLine)
+          ? `${description.trim()}\n\n${fixesLine}`
+          : description;
 
       setPrTitle(title);
       setPrDescription(finalDescription);
@@ -206,11 +213,20 @@ export function CreatePr() {
           JSON.stringify(reviewerList),
         );
       }
-      const result = await createPullRequest(repoPath, title, finalDescription, reviewerList);
+      const result = await createPullRequest(
+        repoPath,
+        title,
+        finalDescription,
+        reviewerList,
+      );
       setPrNumber(result.number);
       setPrUrl(result.url);
       setPhase("done");
-      try { Bun.spawn(["open", result.url], { stdio: ["ignore", "ignore", "ignore"] }); } catch {}
+      try {
+        Bun.spawn(["open", result.url], {
+          stdio: ["ignore", "ignore", "ignore"],
+        });
+      } catch {}
     } catch (e: any) {
       const stderr = e.stderr?.toString?.()?.trim?.();
       setErrorMsg(stderr || e.message || "Failed to generate PR description");
@@ -218,14 +234,18 @@ export function CreatePr() {
     }
   };
 
-
   const addNewReviewer = (name: string, handle: string) => {
     const trimName = name.trim();
     const trimHandle = handle.trim().replace(/^@/, "");
     if (!trimHandle) return;
 
-    const reviewer: Reviewer = { name: trimName || trimHandle, handle: trimHandle };
-    const updated = [...globalReviewers, reviewer].sort((a, b) => a.name.localeCompare(b.name));
+    const reviewer: Reviewer = {
+      name: trimName || trimHandle,
+      handle: trimHandle,
+    };
+    const updated = [...globalReviewers, reviewer].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
     setGlobalReviewers(updated);
     setAppState("reviewers.global", JSON.stringify(updated));
     setSelectedHandles((prev) => new Set([...prev, trimHandle]));
@@ -238,6 +258,7 @@ export function CreatePr() {
     (phase === "reviewers" && addingReviewer !== null);
 
   useInput((input, key) => {
+    if (useStore.getState().modal?.type === "hotkeyMenu") return;
     // Gate: when text input is active, only handle Escape to cancel
     if (textInputActive) {
       if (key.escape) {
@@ -261,7 +282,9 @@ export function CreatePr() {
       if (key.upArrow) {
         setReviewerIndex(Math.max(0, reviewerIndex - 1));
       } else if (key.downArrow) {
-        setReviewerIndex(Math.min(globalReviewers.length - 1, reviewerIndex + 1));
+        setReviewerIndex(
+          Math.min(globalReviewers.length - 1, reviewerIndex + 1),
+        );
       } else if (input === " " && globalReviewers.length > 0) {
         const handle = globalReviewers[reviewerIndex]?.handle;
         if (handle) {
@@ -281,7 +304,6 @@ export function CreatePr() {
       }
       return;
     }
-
   });
 
   if (!activeTask) return null;
@@ -289,9 +311,11 @@ export function CreatePr() {
   return (
     <Box flexDirection="column" paddingX={1} flexGrow={1}>
       <Box marginBottom={1}>
-        <Text bold color="cyan">Create Pull Request</Text>
-        <Text dimColor>  {activeTask.label}</Text>
-        {branch && <Text dimColor>  ({branch})</Text>}
+        <Text bold color="cyan">
+          Create Pull Request
+        </Text>
+        <Text dimColor> {activeTask.label}</Text>
+        {branch && <Text dimColor> ({branch})</Text>}
       </Box>
 
       {/* Init / loading */}
@@ -300,7 +324,10 @@ export function CreatePr() {
       {/* Uncommitted changes */}
       {phase === "uncommitted" && (
         <Box flexDirection="column">
-          <Text color="yellow">{changedFiles} uncommitted file{changedFiles !== 1 ? "s" : ""}. Enter commit message:</Text>
+          <Text color="yellow">
+            {changedFiles} uncommitted file{changedFiles !== 1 ? "s" : ""}.
+            Enter commit message:
+          </Text>
           <Box marginTop={1}>
             <Text color="cyan">&gt; </Text>
             <InkTextInput
@@ -320,11 +347,13 @@ export function CreatePr() {
         <Box flexDirection="column">
           <Box marginBottom={1}>
             <Text bold>Select Reviewers</Text>
-            <Text dimColor>  Space: toggle  a: add  Enter: continue</Text>
+            <Text dimColor> Space: toggle a: add Enter: continue</Text>
           </Box>
 
           {globalReviewers.length === 0 && !addingReviewer && (
-            <Text dimColor>No reviewers configured. Press 'a' to add one, or Enter to skip.</Text>
+            <Text dimColor>
+              No reviewers configured. Press 'a' to add one, or Enter to skip.
+            </Text>
           )}
 
           {globalReviewers.map((r, i) => {
@@ -334,7 +363,8 @@ export function CreatePr() {
               <Box key={r.handle} paddingLeft={1}>
                 <Text color={focused ? "cyan" : undefined} bold={focused}>
                   {focused ? "▸ " : "  "}
-                  {selected ? "[x]" : "[ ]"} {r.name} <Text dimColor>@{r.handle}</Text>
+                  {selected ? "[x]" : "[ ]"} {r.name}{" "}
+                  <Text dimColor>@{r.handle}</Text>
                 </Text>
               </Box>
             );
@@ -358,7 +388,9 @@ export function CreatePr() {
 
           {addingReviewer && addingReviewer.step === "handle" && (
             <Box marginTop={1} flexDirection="column">
-              <Text>GitHub handle for {addingReviewer.name || "reviewer"}:</Text>
+              <Text>
+                GitHub handle for {addingReviewer.name || "reviewer"}:
+              </Text>
               <Box>
                 <Text color="cyan">@</Text>
                 <InkTextInput
@@ -390,7 +422,9 @@ export function CreatePr() {
       {/* Done */}
       {phase === "done" && (
         <Box flexDirection="column">
-          <Text color="green" bold>PR #{prNumber} created!</Text>
+          <Text color="green" bold>
+            PR #{prNumber} created!
+          </Text>
           <Box marginTop={1}>
             <Text>{prUrl}</Text>
           </Box>
@@ -403,7 +437,9 @@ export function CreatePr() {
       {/* Error */}
       {phase === "error" && (
         <Box flexDirection="column">
-          <Text color="red" bold>Error</Text>
+          <Text color="red" bold>
+            Error
+          </Text>
           <Box marginTop={1}>
             <Text color="red">{errorMsg}</Text>
           </Box>

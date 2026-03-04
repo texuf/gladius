@@ -52,7 +52,9 @@ export function RepoSelection() {
     const counts: Record<string, number> = {};
     const taskIds: Record<string, string[]> = {};
     for (const repo of updated) {
-      const active = getTasksForRepo(repo.id).filter((t) => t.status === "active");
+      const active = getTasksForRepo(repo.id).filter(
+        (t) => t.status === "active",
+      );
       counts[repo.id] = active.length;
       taskIds[repo.id] = active.map((t) => t.id);
     }
@@ -162,7 +164,9 @@ export function RepoSelection() {
         });
 
         const updated = reloadRepos();
-        setSelectedIndex(Math.min(selectedIndex, Math.max(0, updated.length - 1)));
+        setSelectedIndex(
+          Math.min(selectedIndex, Math.max(0, updated.length - 1)),
+        );
       } catch (e: any) {
         setError(e.message || "Failed to delete repo");
       } finally {
@@ -210,6 +214,7 @@ export function RepoSelection() {
   };
 
   useInput((input, key) => {
+    if (useStore.getState().modal?.type === "hotkeyMenu") return;
     if (deletingRepoId) return;
 
     if (addingRepo) {
@@ -275,7 +280,9 @@ export function RepoSelection() {
 
       <Box justifyContent="space-between" marginBottom={1}>
         <Text bold>Repos</Text>
-        <Text dimColor>Ctrl+N: New Project r: Refresh g: Project d: Delete q: Quit</Text>
+        <Text dimColor>
+          Ctrl+N: New Project r: Refresh g: Project d: Delete q: Quit
+        </Text>
       </Box>
 
       {repos.length === 0 && !addingRepo && (
@@ -284,7 +291,8 @@ export function RepoSelection() {
 
       {repos.map((repo, i) => {
         const previous = i > 0 ? repos[i - 1] : null;
-        const showProjectHeader = !previous || previous.project_name !== repo.project_name;
+        const showProjectHeader =
+          !previous || previous.project_name !== repo.project_name;
         const isDeleting = deletingRepoId === repo.id;
         const dots = { green: 0, red: 0, orange: 0, yellow: 0, purple: 0 };
         for (const tid of repoTaskIds[repo.id] || []) {
@@ -345,7 +353,9 @@ export function RepoSelection() {
           paddingX={1}
           paddingY={1}
         >
-          <Text bold color="cyan">Create Project</Text>
+          <Text bold color="cyan">
+            Create Project
+          </Text>
           <Box marginTop={1}>
             <Text>Name: </Text>
             <InkTextInput
@@ -356,7 +366,9 @@ export function RepoSelection() {
           </Box>
           {createProjectName.trim() && (
             <Box marginTop={1}>
-              <Text dimColor>Folder: {join(homedir(), createProjectName.trim())}</Text>
+              <Text dimColor>
+                Folder: {join(homedir(), createProjectName.trim())}
+              </Text>
             </Box>
           )}
           {createProjectError && (

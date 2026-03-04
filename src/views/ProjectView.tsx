@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Box, Text, useInput } from "ink";
 import { useStore } from "../store/index.js";
 import { TerminalPane } from "../components/TerminalPane.js";
@@ -92,6 +98,7 @@ export function ProjectView() {
   }, [focusPane, runRefresh]);
 
   useInput((input, key) => {
+    if (useStore.getState().modal?.type === "hotkeyMenu") return;
     if (!activeProject) return;
 
     if (focusPane !== "none") {

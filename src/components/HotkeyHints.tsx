@@ -25,6 +25,7 @@ export function HotkeyHints() {
   const activeRepo = useStore((s) => s.activeRepo);
   const activeTask = useStore((s) => s.activeTask);
   const addingRepo = useStore((s) => s.addingRepo);
+  const modal = useStore((s) => s.modal);
   const gitStatuses = useStore((s) => s.gitStatuses);
   const copyMode = useStore((s) => s.copyMode);
   const prCommentsSelectionKind = useStore((s) => s.prCommentsSelectionKind);
@@ -40,7 +41,9 @@ export function HotkeyHints() {
 
   const hints: string[] = [];
 
-  if (view === "adoptBranch") {
+  if (modal?.type === "hotkeyMenu") {
+    hints.push("↑↓ Navigate", "⏎ Select", "Esc Cancel");
+  } else if (view === "adoptBranch") {
     hints.push("⏎ Submit", "Esc Cancel");
   } else if (view === "taskSwitcher") {
     hints.push("↑↓ Navigate", "⏎ Switch", "Esc Cancel");
@@ -99,8 +102,8 @@ export function HotkeyHints() {
       hints.push("y Exit Copy", "Esc Exit Copy");
     } else if (focusPane === "none") {
       const modelHints = activeTask?.model
-        ? ["c Console", "l Claude", "o Codex"]
-        : ["cl Claude", "co Codex"];
+        ? ["c Console"]
+        : ["c Console (pick model)"];
       const pr = activeTask && gitStatuses[activeTask.id]?.pr;
       const hasIssues =
         pr &&
@@ -115,36 +118,14 @@ export function HotkeyHints() {
         pr.ciFailed === 0 &&
         pr.ciPending === 0 &&
         pr.unresolvedThreads === 0;
-      const hasOpenPr = pr && pr.state === "open";
-      const branch = activeTask && gitStatuses[activeTask.id]?.branch;
-      const changedFiles = activeTask ? (gitStatuses[activeTask.id]?.changedFiles || 0) : 0;
-      const isMerged = pr && pr.state === "merged";
-      const canCreatePr =
-        !pr &&
-        branch !== "main" &&
-        branch !== "master" &&
-        activeTask?.worktree_path;
-      const behindMain = activeTask && gitStatuses[activeTask.id]?.behindMain;
-      const rebaseHints = behindMain && behindMain > 0 && activeTask?.model ? ["gr Rebase"] : [];
-      const commitHints = changedFiles > 0 ? ["gc Commit"] : [];
-      const towerHints = activeTask?.worktree_path ? ["b Tower"] : [];
-      const cursorHints = activeTask?.worktree_path ? ["n Cursor"] : [];
-      const openPrHints = hasOpenPr ? ["p View PR"] : [];
-      const createPrHints = canCreatePr ? ["p Create PR"] : [];
-      const clearPrHints = isMerged ? ["p Clear PR"] : [];
       const prHints = hasIssues ? ["v PR Issues"] : [];
       const mergeHints = isGreen ? ["s Squash Merge"] : [];
       hints.push(
         "i Notes",
         "t Terminal",
+        "o Open",
+        "g Git",
         ...modelHints,
-        ...towerHints,
-        ...cursorHints,
-        ...openPrHints,
-        ...createPrHints,
-        ...clearPrHints,
-        ...rebaseHints,
-        ...commitHints,
         ...prHints,
         ...mergeHints,
         "y Copy",

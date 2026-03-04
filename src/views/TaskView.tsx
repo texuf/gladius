@@ -6,19 +6,24 @@ import { NotesPane } from "../components/NotesPane.js";
 import { TaskStatusPane } from "../components/TaskStatusPane.js";
 import { TerminalPane } from "../components/TerminalPane.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
-import { processChord } from "../utils/keyboard.js";
-import { COMMIT_MESSAGE_MODEL, generateCommitMessage } from "../services/llm.js";
+import {
+  COMMIT_MESSAGE_MODEL,
+  generateCommitMessage,
+} from "../services/llm.js";
 import {
   fetchLatestMain,
   formatPrStatus,
+  getCurrentBranch,
   getGitStatus,
   getGitStatusWithPr,
+  pushBranch,
 } from "../services/git.js";
 import { refreshAllTaskStatuses } from "../services/taskStatus.js";
 import {
   addTaskEvent,
   closeTask as dbCloseTask,
   getAppState,
+  getProjectLinearTeam,
   updateTask,
   getTasksForRepo,
 } from "../services/db.js";
@@ -37,8 +42,6 @@ export function TaskView() {
   const activeRepo = useStore((s) => s.activeRepo);
   const focusPane = useStore((s) => s.focusPane);
   const setFocusPane = useStore((s) => s.setFocusPane);
-  const chordBuffer = useStore((s) => s.chordBuffer);
-  const setChordBuffer = useStore((s) => s.setChordBuffer);
   const escCooldownRef = useRef(0);
   const lastUnfocusRef = useRef(0);
   const prevFocusPaneRef = useRef(focusPane);
@@ -73,9 +76,10 @@ export function TaskView() {
 
     destroySession(sessionKey);
 
-    const updates = activeTask.model === "claude"
-      ? { claude_session_id: null }
-      : { codex_session_id: null };
+    const updates =
+      activeTask.model === "claude"
+        ? { claude_session_id: null }
+        : { codex_session_id: null };
     updateTask(activeTask.id, updates);
     setActiveTask({ ...activeTask, ...updates });
     setTasks(
@@ -106,7 +110,6 @@ export function TaskView() {
         .getState()
         .tasks.map((t) => (t.id === activeTask.id ? { ...t, ...updates } : t)),
     );
-    setChordBuffer("");
     setFocusPane("console");
     markConsoleInteracted(activeTask.id);
   };
@@ -191,6 +194,179 @@ export function TaskView() {
     }
   }, [copyMode]);
 
+  const handleOpenLinearIssue = () => {
+    const issueId = activeTask?.linear_issue_id?.trim();
+    if (!issueId) return;
+    const team = activeRepo
+      ? getProjectLinearTeam(activeRepo.project_id).trim() || "hnt-labs"
+      : "hnt-labs";
+    const url = `https://linear.app/${team}/issue/${issueId}`;
+    try {
+      Bun.spawn(["open", url], { stdio: ["ignore", "ignore", "ignore"] });
+    } catch {}
+  };
+
+  const handlePush = async (force = false) => {
+    if (!activeTask?.worktree_path) return;
+    const repoPath = activeTask.worktree_path;
+    setActionError("");
+    setBusyLabel(force ? "Force pushing" : "Pushing");
+    setFetching(true);
+    try {
+      const branch = await getCurrentBranch(repoPath);
+      if (force) {
+        await $`git -C ${repoPath} push --force-with-lease -u origin ${branch}`.text();
+      } else {
+        await pushBranch(repoPath, branch);
+      }
+      await pollGit();
+      await pollPr(true);
+    } catch (e: any) {
+      const stderr = e?.stderr?.toString?.()?.trim?.();
+      setActionError(
+        stderr || e?.message || (force ? "Force push failed" : "Push failed"),
+      );
+    } finally {
+      setFetching(false);
+      setBusyLabel("Fetching");
+    }
+  };
+
+  const openOpenMenu = () => {
+    const pr = activeTask ? gitStatuses[activeTask.id]?.pr : null;
+    const hasLinearIssue = !!activeTask?.linear_issue_id?.trim();
+    const hasWorktree = !!activeTask?.worktree_path;
+
+    setModal({
+      type: "hotkeyMenu",
+      title: "open",
+      items: [
+        {
+          key: "p",
+          label: "Pull request in browser",
+          disabled: !pr,
+          onSelect: () => {
+            void handleOpenPrInBrowser();
+          },
+        },
+        {
+          key: "l",
+          label: "Linear issue in browser",
+          disabled: !hasLinearIssue,
+          onSelect: handleOpenLinearIssue,
+        },
+        {
+          key: "c",
+          label: "Cursor",
+          disabled: !hasWorktree,
+          onSelect: () => {
+            void handleOpenCursor();
+          },
+        },
+        {
+          key: "t",
+          label: "Tower",
+          disabled: !hasWorktree,
+          onSelect: () => {
+            void handleOpenTower();
+          },
+        },
+      ],
+    });
+  };
+
+  const openGitMenu = () => {
+    const hasWorktree = !!activeTask?.worktree_path;
+    const gitStatus = activeTask ? gitStatuses[activeTask.id] : undefined;
+    const pr = gitStatus?.pr ?? null;
+    const branch = gitStatus?.branch ?? "";
+    const hasTracking = !!gitStatus?.hasTrackingBranch;
+    const ahead = gitStatus?.ahead ?? 0;
+    const behind = gitStatus?.behind ?? 0;
+    const changedFiles = gitStatus?.changedFiles ?? 0;
+    const behindMain = gitStatus?.behindMain ?? 0;
+
+    const isNonMainBranch =
+      branch !== "main" && branch !== "master" && branch.length > 0;
+    const localMatchesRemote = hasTracking && ahead === 0 && behind === 0;
+    const canCreatePr =
+      hasWorktree &&
+      !pr &&
+      isNonMainBranch &&
+      (!hasTracking || localMatchesRemote);
+    const canPush = hasWorktree && hasTracking && ahead > 0 && behind === 0;
+    const canForcePush = hasWorktree && hasTracking && ahead > 0 && behind > 0;
+
+    const primaryLabel = canForcePush
+      ? "Force push"
+      : canPush
+        ? "Push"
+        : canCreatePr
+          ? "Make pull request"
+          : "No push/pr action available";
+    const primaryDisabled = !(canForcePush || canPush || canCreatePr);
+
+    setModal({
+      type: "hotkeyMenu",
+      title: "git",
+      items: [
+        {
+          key: "c",
+          label: "Commit files",
+          disabled: !hasWorktree || changedFiles <= 0,
+          onSelect: () => {
+            void handleGenerateCommit();
+          },
+        },
+        {
+          key: "p",
+          label: primaryLabel,
+          disabled: primaryDisabled,
+          onSelect: () => {
+            if (canForcePush) {
+              void handlePush(true);
+              return;
+            }
+            if (canPush) {
+              void handlePush(false);
+              return;
+            }
+            if (canCreatePr) {
+              setView("createPr");
+            }
+          },
+        },
+        {
+          key: "r",
+          label: "Ask LLM to rebase",
+          disabled: !hasWorktree || !activeTask?.model || behindMain <= 0,
+          onSelect: () => {
+            void handleRebase();
+          },
+        },
+      ],
+    });
+  };
+
+  const openConsoleModelMenu = () => {
+    setModal({
+      type: "hotkeyMenu",
+      title: "console",
+      items: [
+        {
+          key: "l",
+          label: "New Claude session",
+          onSelect: () => selectModel("claude"),
+        },
+        {
+          key: "o",
+          label: "New Codex session",
+          onSelect: () => selectModel("codex"),
+        },
+      ],
+    });
+  };
+
   useInput((input, key) => {
     if (modal) return;
 
@@ -234,21 +410,25 @@ export function TaskView() {
       return;
     }
 
-    if (input === "c" && !key.super && activeTask?.model) {
+    if (input === "c" && !key.super) {
+      if (!activeTask) return;
+      if (!activeTask.model) {
+        openConsoleModelMenu();
+        return;
+      }
       resetDeadConsoleSession();
       setFocusPane("console");
       markConsoleInteracted(activeTask.id);
       return;
     }
 
-    // Switch LLM provider after initial selection
-    if (input === "l" && !key.super && activeTask?.model) {
-      selectModel("claude");
+    if (input === "o" && !key.super) {
+      openOpenMenu();
       return;
     }
 
-    if (input === "o" && !key.super && activeTask?.model) {
-      selectModel("codex");
+    if (input === "g" && !key.super) {
+      openGitMenu();
       return;
     }
 
@@ -364,28 +544,6 @@ export function TaskView() {
       setCopyMode(true);
       return;
     }
-
-    // Chord handling
-    {
-      const { newBuffer, chord } = processChord(chordBuffer, input, key);
-      setChordBuffer(newBuffer);
-
-      if ((chord === "cl" || chord === "co") && !activeTask?.model) {
-        const model = chord === "cl" ? "claude" : "codex";
-        selectModel(model);
-        return;
-      }
-
-      if (chord === "gr" && activeTask?.worktree_path && activeTask?.model) {
-        void handleRebase();
-        return;
-      }
-
-      const changedFiles = activeTask ? (gitStatuses[activeTask.id]?.changedFiles || 0) : 0;
-      if (chord === "gc" && activeTask?.worktree_path && changedFiles > 0) {
-        void handleGenerateCommit();
-      }
-    }
   });
 
   const handleSquashMerge = async (prNumber: number) => {
@@ -406,7 +564,7 @@ export function TaskView() {
   const handleOpenPrInBrowser = async () => {
     if (!activeTask?.worktree_path) return;
     const pr = gitStatuses[activeTask.id]?.pr;
-    if (!pr || pr.state !== "open") return;
+    if (!pr) return;
     try {
       const remoteUrl = (
         await $`git -C ${activeTask.worktree_path} remote get-url origin`.text()
@@ -465,7 +623,9 @@ export function TaskView() {
     try {
       const apiKey = getAppState("settings.openai_api_key");
       if (!apiKey) {
-        setActionError("OpenAI API key not set. Press 's' in Repo Selection to open Settings.");
+        setActionError(
+          "OpenAI API key not set. Press 's' in Repo Selection to open Settings.",
+        );
         return;
       }
 
@@ -475,12 +635,13 @@ export function TaskView() {
         return;
       }
 
-      const [trackedNameOnly, trackedDiff, untrackedNameOnly] = await Promise.all([
-        // HEAD diff includes both staged and unstaged tracked changes.
-        $`git -C ${repoPath} diff --name-only HEAD --`.text(),
-        $`git -C ${repoPath} diff HEAD --`.text(),
-        $`git -C ${repoPath} ls-files --others --exclude-standard`.text(),
-      ]);
+      const [trackedNameOnly, trackedDiff, untrackedNameOnly] =
+        await Promise.all([
+          // HEAD diff includes both staged and unstaged tracked changes.
+          $`git -C ${repoPath} diff --name-only HEAD --`.text(),
+          $`git -C ${repoPath} diff HEAD --`.text(),
+          $`git -C ${repoPath} ls-files --others --exclude-standard`.text(),
+        ]);
 
       const trackedFiles = new Set(
         trackedNameOnly
@@ -489,13 +650,17 @@ export function TaskView() {
           .filter(Boolean),
       );
       if (trackedFiles.size === 0) {
-        setActionError("Only untracked files are changed; gc uses git commit -am.");
+        setActionError(
+          "Only untracked files are changed; gc uses git commit -am.",
+        );
         return;
       }
 
       const diffSections: string[] = [];
       if (trackedDiff.trim()) {
-        diffSections.push(`### Tracked diff (HEAD..working tree)\n${trackedDiff.trim()}`);
+        diffSections.push(
+          `### Tracked diff (HEAD..working tree)\n${trackedDiff.trim()}`,
+        );
       }
 
       const untrackedFiles = untrackedNameOnly
@@ -504,7 +669,10 @@ export function TaskView() {
         .filter(Boolean);
       if (untrackedFiles.length > 0) {
         const patches: string[] = [];
-        for (const relPath of untrackedFiles.slice(0, MAX_UNTRACKED_FILES_IN_PROMPT)) {
+        for (const relPath of untrackedFiles.slice(
+          0,
+          MAX_UNTRACKED_FILES_IN_PROMPT,
+        )) {
           try {
             const patch =
               await $`git -C ${repoPath} diff --no-index -- /dev/null ${relPath}`.text();
@@ -512,7 +680,9 @@ export function TaskView() {
           } catch {}
         }
         if (patches.length > 0) {
-          diffSections.push(`### Untracked file patches\n${patches.join("\n\n")}`);
+          diffSections.push(
+            `### Untracked file patches\n${patches.join("\n\n")}`,
+          );
         }
         if (untrackedFiles.length > MAX_UNTRACKED_FILES_IN_PROMPT) {
           diffSections.push(
@@ -522,26 +692,27 @@ export function TaskView() {
       }
 
       const combinedDiff = diffSections.join("\n\n");
-      const boundedDiff = combinedDiff.length > MAX_DIFF_CHARS
-        ? `${combinedDiff.slice(0, MAX_DIFF_CHARS)}\n\n[diff truncated]`
-        : combinedDiff;
+      const boundedDiff =
+        combinedDiff.length > MAX_DIFF_CHARS
+          ? `${combinedDiff.slice(0, MAX_DIFF_CHARS)}\n\n[diff truncated]`
+          : combinedDiff;
 
       const recentPrompts = getRecentTaskPrompts(activeTask, 300);
       const promptLines: string[] = [];
       let promptChars = 0;
       for (let i = recentPrompts.length - 1; i >= 0; i--) {
         const prompt = recentPrompts[i];
-        const line =
-          `[${prompt.source} ${prompt.timestamp || "unknown"}] ${prompt.text}`;
+        const line = `[${prompt.source} ${prompt.timestamp || "unknown"}] ${prompt.text}`;
         if (promptChars + line.length > MAX_PROMPTS_CHARS) break;
         promptLines.unshift(line);
         promptChars += line.length;
       }
 
       const description = (activeTask.description || "").trim();
-      const boundedDescription = description.length > MAX_DESCRIPTION_CHARS
-        ? description.slice(0, MAX_DESCRIPTION_CHARS)
-        : description;
+      const boundedDescription =
+        description.length > MAX_DESCRIPTION_CHARS
+          ? description.slice(0, MAX_DESCRIPTION_CHARS)
+          : description;
 
       const commitMsg = await generateCommitMessage(
         apiKey,
@@ -701,15 +872,9 @@ export function TaskView() {
         </Box>
         <Box gap={1}>
           <StatusDots {...allDots} />
-          {!activeTask.model ? (
-            <Text dimColor color="yellow">
-              cl: Claude co: Codex
-            </Text>
-          ) : (
-            <Text dimColor color="yellow">
-              l: Claude o: Codex
-            </Text>
-          )}
+          <Text dimColor color="yellow">
+            o: Open g: Git c: Console
+          </Text>
         </Box>
       </Box>
 

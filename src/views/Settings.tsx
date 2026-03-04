@@ -2,7 +2,11 @@ import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import InkTextInput from "ink-text-input";
 import { useStore } from "../store/index.js";
-import { getAppState, getAppStatesByPrefix, setAppState } from "../services/db.js";
+import {
+  getAppState,
+  getAppStatesByPrefix,
+  setAppState,
+} from "../services/db.js";
 import type { Reviewer } from "../store/types.js";
 
 const FIELDS = [
@@ -33,7 +37,8 @@ export function Settings() {
 
   const totalItems = FIELDS.length + reviewers.length;
   const selectedReviewerIndex = selectedIndex - FIELDS.length;
-  const selectedReviewer = selectedReviewerIndex >= 0 ? reviewers[selectedReviewerIndex] : null;
+  const selectedReviewer =
+    selectedReviewerIndex >= 0 ? reviewers[selectedReviewerIndex] : null;
 
   useEffect(() => {
     const loaded: Record<string, string | null> = {};
@@ -42,11 +47,14 @@ export function Settings() {
     }
     setValues(loaded);
     const globalJson = getAppState("reviewers.global");
-    const loadedReviewers: Reviewer[] = globalJson ? JSON.parse(globalJson) : [];
+    const loadedReviewers: Reviewer[] = globalJson
+      ? JSON.parse(globalJson)
+      : [];
     setReviewers(loadedReviewers);
   }, []);
 
   useInput((_input, key) => {
+    if (useStore.getState().modal?.type === "hotkeyMenu") return;
     if (editingFieldKey || editingReviewer) {
       if (key.escape) {
         setEditingFieldKey(null);
@@ -64,9 +72,12 @@ export function Settings() {
     if (key.upArrow) {
       setSelectedIndex(Math.max(0, selectedIndex - 1));
     } else if (key.downArrow) {
-      setSelectedIndex(Math.min(Math.max(0, totalItems - 1), selectedIndex + 1));
+      setSelectedIndex(
+        Math.min(Math.max(0, totalItems - 1), selectedIndex + 1),
+      );
     } else if (key.return) {
-      const selectedField = selectedIndex < FIELDS.length ? FIELDS[selectedIndex] : null;
+      const selectedField =
+        selectedIndex < FIELDS.length ? FIELDS[selectedIndex] : null;
       if (selectedField) {
         setEditingFieldKey(selectedField.key);
         setEditValue("");
@@ -99,7 +110,10 @@ export function Settings() {
     setEditValue("");
   };
 
-  const migrateRepoReviewerDefaults = (oldHandle: string, newHandle: string) => {
+  const migrateRepoReviewerDefaults = (
+    oldHandle: string,
+    newHandle: string,
+  ) => {
     if (oldHandle === newHandle) return;
     const rows = getAppStatesByPrefix("reviewers.repo.");
     for (const row of rows) {
@@ -107,7 +121,9 @@ export function Settings() {
       try {
         const handles = JSON.parse(row.value) as string[];
         if (!Array.isArray(handles) || !handles.includes(oldHandle)) continue;
-        const updated = [...new Set(handles.map((h) => (h === oldHandle ? newHandle : h)))];
+        const updated = [
+          ...new Set(handles.map((h) => (h === oldHandle ? newHandle : h))),
+        ];
         setAppState(row.key, JSON.stringify(updated));
       } catch {
         // Ignore malformed legacy values.
@@ -133,7 +149,9 @@ export function Settings() {
     }
 
     const duplicate = reviewers.some(
-      (r, i) => i !== editingReviewer.index && r.handle.toLowerCase() === normalized.toLowerCase()
+      (r, i) =>
+        i !== editingReviewer.index &&
+        r.handle.toLowerCase() === normalized.toLowerCase(),
     );
     if (duplicate) {
       setError(`@${normalized} already exists.`);
@@ -164,9 +182,10 @@ export function Settings() {
     <Box flexDirection="column" paddingX={1} flexGrow={1}>
       <Box marginBottom={1}>
         <Text bold color="cyan">
-          {" "}GLADIUS{" "}
+          {" "}
+          GLADIUS{" "}
         </Text>
-        <Text dimColor>  Settings</Text>
+        <Text dimColor> Settings</Text>
       </Box>
 
       <Box flexDirection="column" marginBottom={1}>
@@ -212,8 +231,14 @@ export function Settings() {
       {reviewers.map((reviewer, i) => {
         const globalIndex = FIELDS.length + i;
         const isSelected = globalIndex === selectedIndex;
-        const isEditingName = isSelected && editingReviewer?.index === i && editingReviewer.step === "name";
-        const isEditingHandle = isSelected && editingReviewer?.index === i && editingReviewer.step === "handle";
+        const isEditingName =
+          isSelected &&
+          editingReviewer?.index === i &&
+          editingReviewer.step === "name";
+        const isEditingHandle =
+          isSelected &&
+          editingReviewer?.index === i &&
+          editingReviewer.step === "handle";
 
         return (
           <Box key={reviewer.handle} paddingLeft={1} flexDirection="column">

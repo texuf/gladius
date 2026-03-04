@@ -2,7 +2,12 @@ import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import InkTextInput from "ink-text-input";
 import { useStore } from "../store/index.js";
-import { getAllRepos, getTasksForRepo, touchTask, touchRepo } from "../services/db.js";
+import {
+  getAllRepos,
+  getTasksForRepo,
+  touchTask,
+  touchRepo,
+} from "../services/db.js";
 import type { Task } from "../store/types.js";
 import { StatusDots } from "../components/StatusDots.js";
 
@@ -30,7 +35,9 @@ export function TaskSwitcher() {
     const tasks: TaskWithRepo[] = [];
 
     for (const repo of repos) {
-      const repoTasks = getTasksForRepo(repo.id).filter((t) => t.status === "active");
+      const repoTasks = getTasksForRepo(repo.id).filter(
+        (t) => t.status === "active",
+      );
       for (const task of repoTasks) {
         tasks.push({
           ...task,
@@ -63,6 +70,7 @@ export function TaskSwitcher() {
     : allTasks;
 
   useInput((input, key) => {
+    if (useStore.getState().modal?.type === "hotkeyMenu") return;
     if (key.escape) {
       setView("tasks");
       return;
@@ -155,10 +163,7 @@ export function TaskSwitcher() {
                   {idx === selectedIndex ? "▸ " : "  "}
                   {truncateDescription(task.description)}
                 </Text>
-                <Text dimColor>
-                  {" "}
-                  {task.label}
-                </Text>
+                <Text dimColor> {task.label}</Text>
               </Box>
             );
           })}
@@ -191,10 +196,7 @@ export function TaskSwitcher() {
                   {idx === selectedIndex ? "▸ " : "  "}
                   {task.repoName} / {truncateDescription(task.description)}
                 </Text>
-                <Text dimColor>
-                  {" "}
-                  {task.label}
-                </Text>
+                <Text dimColor> {task.label}</Text>
               </Box>
             );
           })}
@@ -208,7 +210,7 @@ export function TaskSwitcher() {
       )}
 
       <Box marginTop={1}>
-        <Text dimColor>↑↓ Navigate  ⏎ Switch  Esc Cancel</Text>
+        <Text dimColor>↑↓ Navigate ⏎ Switch Esc Cancel</Text>
       </Box>
     </Box>
   );

@@ -61,7 +61,13 @@ export interface PrStatus {
   ciPending: number;
 }
 
-export type TaskStatusColor = "green" | "red" | "orange" | "yellow" | "purple" | "none";
+export type TaskStatusColor =
+  | "green"
+  | "red"
+  | "orange"
+  | "yellow"
+  | "purple"
+  | "none";
 
 export interface GitStatus {
   branch: string;
@@ -119,6 +125,17 @@ export interface CiCheckFailure {
 export type ModalState =
   | { type: "newTask" }
   | { type: "confirm"; message: string; onConfirm: () => void }
+  | {
+      type: "hotkeyMenu";
+      title: string;
+      items: Array<{
+        key: string;
+        label: string;
+        disabled?: boolean;
+        onSelect: () => void;
+      }>;
+      onCancel?: () => void;
+    }
   | null;
 
 export interface AppState {

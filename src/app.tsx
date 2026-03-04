@@ -18,6 +18,7 @@ import { CreatePr } from "./views/CreatePr.js";
 import { Standup } from "./views/Standup.js";
 import { AdoptBranch } from "./views/AdoptBranch.js";
 import { HotkeyHints } from "./components/HotkeyHints.js";
+import { HotkeyMenuModal } from "./components/HotkeyMenuModal.js";
 import { hasModifier } from "./utils/keyboard.js";
 import type { ViewState } from "./store/types.js";
 import { refreshAllTaskStatuses } from "./services/taskStatus.js";
@@ -30,6 +31,7 @@ export function App() {
   const setModal = useStore((s) => s.setModal);
   const activeRepo = useStore((s) => s.activeRepo);
   const addingRepo = useStore((s) => s.addingRepo);
+  const hotkeyMenu = modal?.type === "hotkeyMenu" ? modal : null;
 
   const resolveRestoredView = (
     savedView: ViewState | null,
@@ -37,7 +39,8 @@ export function App() {
     hasActiveRepo: boolean,
     hasTask: boolean,
   ): ViewState => {
-    const preferred = savedView ??
+    const preferred =
+      savedView ??
       (hasActiveRepo ? "tasks" : hasActiveProject ? "projectView" : "projects");
 
     switch (preferred) {
@@ -111,9 +114,16 @@ export function App() {
     const hasTask = !!state.activeTask;
     const hasActiveRepo = !!state.activeRepo;
     const hasActiveProject = !!state.activeProject;
-    useStore.getState().setView(
-      resolveRestoredView(savedView, hasActiveProject, hasActiveRepo, hasTask),
-    );
+    useStore
+      .getState()
+      .setView(
+        resolveRestoredView(
+          savedView,
+          hasActiveProject,
+          hasActiveRepo,
+          hasTask,
+        ),
+      );
   }, []);
 
   // Poll task statuses globally (LLM activity + PR status)
@@ -230,7 +240,23 @@ export function App() {
 
   return (
     <Box flexDirection="column" width="100%" height="100%">
-      {renderView()}
+      <Box flexGrow={1} flexDirection="column">
+        {renderView()}
+        {hotkeyMenu && (
+          <HotkeyMenuModal
+            menu={hotkeyMenu}
+            onSelect={(item) => {
+              setModal(null);
+              item.onSelect();
+            }}
+            onCancel={() => {
+              const onCancel = hotkeyMenu.onCancel;
+              setModal(null);
+              onCancel?.();
+            }}
+          />
+        )}
+      </Box>
       <HotkeyHints />
     </Box>
   );

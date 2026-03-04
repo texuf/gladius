@@ -247,6 +247,7 @@ export function PrComments() {
   };
 
   useInput((input, key) => {
+    if (useStore.getState().modal?.type === "hotkeyMenu") return;
     if (key.escape) {
       goBack();
       return;

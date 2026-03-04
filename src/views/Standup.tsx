@@ -44,6 +44,7 @@ export function Standup() {
   }, []);
 
   useInput((input, key) => {
+    if (useStore.getState().modal?.type === "hotkeyMenu") return;
     if (key.escape) {
       setView("projects");
       return;

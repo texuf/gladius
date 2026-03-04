@@ -2,10 +2,7 @@ import React, { useState, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
 import InkTextInput from "ink-text-input";
 import { useStore } from "../store/index.js";
-import {
-  getTasksForRepo,
-  createTask as dbCreateTask,
-} from "../services/db.js";
+import { getTasksForRepo, createTask as dbCreateTask } from "../services/db.js";
 import { adoptBranch } from "../services/worktree.js";
 import { deduplicateLabel } from "../utils/label.js";
 
@@ -64,6 +61,7 @@ export function AdoptBranch() {
   };
 
   useInput((input, key) => {
+    if (useStore.getState().modal?.type === "hotkeyMenu") return;
     if (key.escape) {
       setView("tasks");
       return;
