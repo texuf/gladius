@@ -164,8 +164,15 @@ export function CreatePr() {
         boundedTaskDescription,
         promptLines.join("\n"),
       );
+
+      const fixesId = activeTask?.linear_issue_id?.trim() || "";
+      const fixesLine = fixesId ? `fixes: ${fixesId}` : "";
+      const finalDescription = fixesLine && !description.includes(fixesLine)
+        ? `${description.trim()}\n\n${fixesLine}`
+        : description;
+
       setPrTitle(title);
-      setPrDescription(description);
+      setPrDescription(finalDescription);
       // Skip confirmation — go straight to creating the PR
       setPhase("creating");
       const reviewerList = Array.from(selectedHandles);
@@ -175,7 +182,7 @@ export function CreatePr() {
           JSON.stringify(reviewerList),
         );
       }
-      const result = await createPullRequest(repoPath, title, description, reviewerList);
+      const result = await createPullRequest(repoPath, title, finalDescription, reviewerList);
       setPrNumber(result.number);
       setPrUrl(result.url);
       setPhase("done");

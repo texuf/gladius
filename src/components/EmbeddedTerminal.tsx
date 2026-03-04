@@ -20,6 +20,7 @@ interface EmbeddedTerminalProps {
   singleEsc?: boolean;
   onEsc?: (pid: number) => void;
   onError?: (message: string) => void;
+  onSessionReady?: (isNew: boolean) => void;
 }
 
 // Convert xterm buffer cell attributes to ANSI SGR escape sequences
@@ -177,6 +178,7 @@ export function EmbeddedTerminal({
   singleEsc = false,
   onEsc,
   onError,
+  onSessionReady,
 }: EmbeddedTerminalProps) {
   const [lines, setLines] = useState<string[]>([]);
   const stdinListenerRef = useRef<((data: Buffer | string) => void) | null>(
@@ -238,6 +240,7 @@ export function EmbeddedTerminal({
 
     // Render immediately from existing buffer
     setLines(bufferToAnsiLines(xterm));
+    onSessionReady?.(session.isNew);
 
     // Raw stdin → PTY with Esc handling
     // Single Esc → forwarded to PTY (e.g. vim insert→normal)
@@ -361,7 +364,7 @@ export function EmbeddedTerminal({
       }
       process.stdout.removeListener("resize", onResize);
     };
-  }, [taskId, propRows, propCols, commandKey]);
+  }, [taskId, propRows, propCols, commandKey, onSessionReady]);
 
   // Pause/resume render loop for copy mode
   const xtermRef = useRef<Terminal | null>(null);

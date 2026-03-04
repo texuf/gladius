@@ -147,12 +147,17 @@ export function watchForCodexSessionId(
 export function buildLlmCommand(
   model: "claude" | "codex",
   sessionId?: string | null,
-  cwd?: string
+  cwd?: string,
+  startupPrompt?: string,
 ): string[] {
+  const prompt = startupPrompt?.trim();
+
   if (model === "claude") {
-    return sessionId ? ["claude", "--resume", sessionId] : ["claude"];
+    if (sessionId) return ["claude", "--resume", sessionId];
+    return prompt ? ["claude", prompt] : ["claude"];
   }
   // codex — needs explicit -C <dir> to set working root
   const base = cwd ? ["codex", "-C", cwd] : ["codex"];
-  return sessionId ? ["codex", "resume", sessionId] : base;
+  if (sessionId) return ["codex", "resume", sessionId];
+  return prompt ? [...base, "--", prompt] : base;
 }

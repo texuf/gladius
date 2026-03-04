@@ -6,8 +6,10 @@ import {
   getAllRepos,
   getAppState,
   getProjectById,
+  isProjectLinearEnabled,
   refreshProjectRepos,
   setAppState,
+  setProjectLinearEnabled,
   touchProject,
 } from "../services/db.js";
 import { destroySession } from "../services/terminalManager.js";
@@ -25,6 +27,7 @@ export function ProjectView() {
   const setChordBuffer = useStore((s) => s.setChordBuffer);
 
   const [model, setModel] = useState<"claude" | "codex" | null>(null);
+  const [linearEnabled, setLinearEnabled] = useState(false);
   const [refreshStatus, setRefreshStatus] = useState("");
   const [error, setError] = useState("");
   const prevFocusPaneRef = useRef(focusPane);
@@ -40,6 +43,7 @@ export function ProjectView() {
     touchProject(activeProject.id);
     const saved = getAppState(`project.model.${activeProject.id}`);
     setModel(saved === "claude" || saved === "codex" ? saved : null);
+    setLinearEnabled(isProjectLinearEnabled(activeProject.id));
   }, [activeProject?.id]);
 
   const selectModel = (nextModel: "claude" | "codex") => {
@@ -72,6 +76,13 @@ export function ProjectView() {
       setError(e.message || "Refresh failed");
     }
   }, [activeProject?.id, setActiveProject, setRepos]);
+
+  const toggleLinear = () => {
+    if (!activeProject) return;
+    const next = !linearEnabled;
+    setProjectLinearEnabled(activeProject.id, next);
+    setLinearEnabled(next);
+  };
 
   useEffect(() => {
     if (prevFocusPaneRef.current === "terminal" && focusPane === "none") {
@@ -125,6 +136,11 @@ export function ProjectView() {
       return;
     }
 
+    if (input === "y" && !key.super) {
+      toggleLinear();
+      return;
+    }
+
     const { newBuffer, chord } = processChord(chordBuffer, input, key);
     setChordBuffer(newBuffer);
     if (!model && (chord === "cl" || chord === "co")) {
@@ -156,6 +172,7 @@ export function ProjectView() {
           {projectRepos.length} repo{projectRepos.length === 1 ? "" : "s"}
           {refreshStatus ? ` | ${refreshStatus}` : ""}
           {model ? ` | model: ${model}` : " | cl: Claude co: Codex"}
+          {` | linear: ${linearEnabled ? "on" : "off"} (y toggle)`}
         </Text>
         {error && <Text color="red">{error}</Text>}
       </Box>

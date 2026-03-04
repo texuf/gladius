@@ -1,8 +1,10 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Box, Text, useInput } from "ink";
 import { useStore } from "../store/index.js";
 import {
+  getProjectLinearTeam,
   getTasksForRepo,
+  isProjectLinearEnabled,
   closeTask as dbCloseTask,
   swapTaskOrder,
   touchTask,
@@ -11,6 +13,8 @@ import {
   updateTask as dbUpdateTask,
 } from "../services/db.js";
 import { formatGitStatus } from "../services/git.js";
+import { listLinearIssuesForRepo } from "../services/linear.js";
+import type { LinearIssue } from "../services/linear.js";
 import { generateLabel, deduplicateLabel } from "../utils/label.js";
 import { createWorktree } from "../services/worktree.js";
 import { deleteWorktree } from "../services/worktree.js";
@@ -22,6 +26,10 @@ import type { Task } from "../store/types.js";
 
 const SHORT_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+type TaskListRow =
+  | { kind: "linear"; issue: LinearIssue }
+  | { kind: "task"; task: Task };
 
 function formatClosedDate(closedAt: string | null): string {
   if (!closedAt) return "";
@@ -59,7 +67,12 @@ export function TaskList() {
 
   const [newTaskDesc, setNewTaskDesc] = useState("");
   const [creating, setCreating] = useState(false);
+  const [linearIssues, setLinearIssues] = useState<LinearIssue[]>([]);
+  const [linearLoading, setLinearLoading] = useState(false);
   const activeTask = useStore((s) => s.activeTask);
+
+  const linearEnabled = !!activeRepo && isProjectLinearEnabled(activeRepo.project_id);
+  const linearTeam = activeRepo ? getProjectLinearTeam(activeRepo.project_id) : "hnt-labs";
 
   const activeTasks = tasks.filter(
     (t) => t.status === "active" || t.status === "closing",
@@ -71,51 +84,142 @@ export function TaskList() {
     );
   const allTasks = [...activeTasks, ...closedTasks];
 
-  // Restore selection to the active task when returning from taskView
+  const inProgressLinearIds = useMemo(
+    () =>
+      new Set(
+        tasks
+          .filter((t) => (t.status === "active" || t.status === "closing") && t.linear_issue_id)
+          .map((t) => t.linear_issue_id as string),
+      ),
+    [tasks],
+  );
+
+  const visibleLinearIssues = useMemo(
+    () => linearIssues.filter((issue) => !inProgressLinearIds.has(issue.id)),
+    [linearIssues, inProgressLinearIds],
+  );
+
+  const rows: TaskListRow[] = useMemo(
+    () => [
+      ...visibleLinearIssues.map((issue) => ({ kind: "linear", issue }) as const),
+      ...allTasks.map((task) => ({ kind: "task", task }) as const),
+    ],
+    [visibleLinearIssues, allTasks],
+  );
+
   useEffect(() => {
-    if (activeTask) {
-      const idx = allTasks.findIndex((t) => t.id === activeTask.id);
-      if (idx >= 0) setSelectedIndex(idx);
+    if (!activeRepo || !linearEnabled) {
+      setLinearIssues([]);
+      setLinearLoading(false);
+      return;
     }
-  }, []);
+
+    let cancelled = false;
+    setLinearLoading(true);
+    listLinearIssuesForRepo(activeRepo.path, linearTeam)
+      .then((issues) => {
+        if (cancelled) return;
+        setLinearIssues(issues);
+      })
+      .finally(() => {
+        if (!cancelled) setLinearLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRepo?.id, activeRepo?.path, linearEnabled, linearTeam]);
+
+  // Keep selection in bounds when rows appear/disappear.
+  useEffect(() => {
+    const max = Math.max(0, rows.length - 1);
+    if (selectedIndex > max) {
+      setSelectedIndex(max);
+    }
+  }, [rows.length, selectedIndex, setSelectedIndex]);
+
+  // Initial selection policy:
+  // - backward nav: keep previously focused task
+  // - forward nav: start on first task (not first linear issue)
+  const initializedSelectionRef = useRef(false);
+  useEffect(() => {
+    initializedSelectionRef.current = false;
+  }, [activeRepo?.id]);
+  useEffect(() => {
+    if (initializedSelectionRef.current) return;
+    if (linearEnabled && linearLoading) return;
+
+    initializedSelectionRef.current = true;
+
+    if (activeTask) {
+      const idx = rows.findIndex(
+        (row) => row.kind === "task" && row.task.id === activeTask.id,
+      );
+      if (idx >= 0) {
+        setSelectedIndex(idx);
+        return;
+      }
+    }
+
+    if (allTasks.length > 0) {
+      setSelectedIndex(visibleLinearIssues.length);
+      return;
+    }
+
+    if (visibleLinearIssues.length > 0) {
+      setSelectedIndex(0);
+    }
+  }, [
+    linearEnabled,
+    linearLoading,
+    rows,
+    allTasks.length,
+    visibleLinearIssues.length,
+    activeTask?.id,
+    setSelectedIndex,
+  ]);
 
   useInput((input, key) => {
     if (modal || creating) return;
 
-    const selectedTask = allTasks[selectedIndex];
+    const selectedRow = rows[selectedIndex];
+    const selectedTask = selectedRow?.kind === "task" ? selectedRow.task : null;
+    const maxRowIndex = Math.max(0, rows.length - 1);
 
     if (key.upArrow && !key.shift) {
       setSelectedIndex(Math.max(0, selectedIndex - 1));
     } else if (key.downArrow && !key.shift) {
-      setSelectedIndex(Math.min(allTasks.length - 1, selectedIndex + 1));
+      setSelectedIndex(Math.min(maxRowIndex, selectedIndex + 1));
     } else if (key.upArrow && key.shift) {
-      // Reorder: swap with previous (active tasks only)
-      if (
-        selectedIndex > 0 &&
-        selectedTask?.status === "active" &&
-        activeTasks[selectedIndex - 1]
-      ) {
-        swapTaskOrder(
-          activeTasks[selectedIndex].id,
-          activeTasks[selectedIndex - 1].id,
-        );
-        reloadTasks();
-        setSelectedIndex(selectedIndex - 1);
-      }
+      if (!selectedTask || selectedTask.status !== "active") return;
+      const activeIdx = activeTasks.findIndex((t) => t.id === selectedTask.id);
+      if (activeIdx <= 0) return;
+
+      swapTaskOrder(
+        activeTasks[activeIdx].id,
+        activeTasks[activeIdx - 1].id,
+      );
+      reloadTasks();
+      setSelectedIndex(visibleLinearIssues.length + activeIdx - 1);
     } else if (key.downArrow && key.shift) {
-      // Reorder: swap with next (active tasks only)
-      if (
-        selectedIndex < activeTasks.length - 1 &&
-        selectedTask?.status === "active" &&
-        activeTasks[selectedIndex + 1]
-      ) {
-        swapTaskOrder(
-          activeTasks[selectedIndex].id,
-          activeTasks[selectedIndex + 1].id,
-        );
-        reloadTasks();
-        setSelectedIndex(selectedIndex + 1);
-      }
+      if (!selectedTask || selectedTask.status !== "active") return;
+      const activeIdx = activeTasks.findIndex((t) => t.id === selectedTask.id);
+      if (activeIdx < 0 || activeIdx >= activeTasks.length - 1) return;
+
+      swapTaskOrder(
+        activeTasks[activeIdx].id,
+        activeTasks[activeIdx + 1].id,
+      );
+      reloadTasks();
+      setSelectedIndex(visibleLinearIssues.length + activeIdx + 1);
+    } else if (key.return && selectedRow?.kind === "linear") {
+      void handleCreateTaskFromIssue(selectedRow.issue);
+    } else if (input === "p" && !key.super && selectedRow?.kind === "linear") {
+      try {
+        Bun.spawn(["open", selectedRow.issue.url], {
+          stdio: ["ignore", "ignore", "ignore"],
+        });
+      } catch {}
     } else if (key.return && selectedTask?.status === "active") {
       if (!activeRepo) return;
       touchTask(selectedTask.id);
@@ -128,7 +232,7 @@ export function TaskList() {
     } else if (key.return && selectedTask?.status === "closing") {
       // No-op — task is being closed
     } else if (key.return && selectedTask?.status === "closed") {
-      handleReopenTask(selectedTask);
+      void handleReopenTask(selectedTask);
     } else if (input === "x" && selectedTask?.status === "active") {
       setModal({
         type: "confirm",
@@ -143,7 +247,7 @@ export function TaskList() {
       const updated = getTasksForRepo(activeRepo.id);
       setTasks(updated);
     }
-  }, [activeRepo]);
+  }, [activeRepo, setTasks]);
 
   const handleCloseTask = (task: Task) => {
     // Mark as closing immediately
@@ -199,7 +303,10 @@ export function TaskList() {
     }
   };
 
-  const handleCreateTask = async (description: string) => {
+  const createTaskFromDescription = async (
+    description: string,
+    options?: { linearIssueId?: string | null },
+  ) => {
     if (!description.trim() || !activeRepo) return;
 
     setCreating(true);
@@ -216,6 +323,7 @@ export function TaskList() {
         description,
         branchName,
         worktreePath,
+        options,
       );
 
       reloadTasks();
@@ -226,14 +334,24 @@ export function TaskList() {
       setActiveTask(task);
       setView("taskView");
     } catch (e: any) {
-      // TODO: show error
       console.error("Failed to create task:", e.message);
     } finally {
       setCreating(false);
     }
   };
 
+  const handleCreateTaskFromIssue = async (issue: LinearIssue) => {
+    const description = `[${issue.id}] ${issue.title}`;
+    await createTaskFromDescription(description, { linearIssueId: issue.id });
+  };
+
+  const handleCreateTask = async (description: string) => {
+    await createTaskFromDescription(description);
+  };
+
   if (!activeRepo) return null;
+
+  let rowIdx = 0;
 
   return (
     <Box flexDirection="column" paddingX={1} flexGrow={1}>
@@ -254,17 +372,56 @@ export function TaskList() {
         })()}
       </Box>
 
+      {linearEnabled && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text bold>Linear</Text>
+          {linearLoading && (
+            <Box paddingLeft={1}>
+              <Text dimColor>Loading assigned issues...</Text>
+            </Box>
+          )}
+          {!linearLoading && visibleLinearIssues.length === 0 && (
+            <Box paddingLeft={1}>
+              <Text dimColor>No uncompleted assigned issues.</Text>
+            </Box>
+          )}
+          {!linearLoading &&
+            visibleLinearIssues.map((issue) => {
+              const idx = rowIdx++;
+              const isSelected = idx === selectedIndex;
+              const status = `${issue.statusIcon ? `${issue.statusIcon} ` : ""}${issue.status}`.trim();
+              return (
+                <Box key={issue.id} paddingLeft={1}>
+                  <Text
+                    color={isSelected ? "cyan" : undefined}
+                    bold={isSelected}
+                  >
+                    {isSelected ? " ▸ " : "   "}
+                    {issue.id}
+                    {status ? `  ${status}` : ""}
+                    {`  ${issue.title}`}
+                  </Text>
+                </Box>
+              );
+            })}
+        </Box>
+      )}
+
       <Box justifyContent="space-between" marginBottom={1}>
         <Text bold>Tasks</Text>
         <Text dimColor>Ctrl+N: New</Text>
       </Box>
 
       {allTasks.length === 0 && (
-        <Text dimColor>No tasks. Press Ctrl+N to create one.</Text>
+        <Text dimColor>
+          No tasks. Press Ctrl+N to create one.
+          {linearEnabled ? " Press Enter on a Linear issue to create from ticket." : ""}
+        </Text>
       )}
 
       {allTasks.map((task, i) => {
-        const isSelected = i === selectedIndex;
+        const idx = rowIdx++;
+        const isSelected = idx === selectedIndex;
         const isClosed = task.status === "closed";
         const isClosing = task.status === "closing";
         const status = gitStatuses[task.id];

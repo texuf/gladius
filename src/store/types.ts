@@ -22,6 +22,8 @@ export interface Task {
   repo_id: string;
   label: string;
   description: string;
+  linear_issue_id: string | null;
+  linear_issue_started_at: string | null;
   status: "active" | "closing" | "closed";
   model: "claude" | "codex" | null;
   claude_session_id: string | null;

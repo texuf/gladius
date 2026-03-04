@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Box, Text } from "ink";
 import { readdirSync } from "fs";
 import { useStore } from "../store/index.js";
+import { isProjectLinearEnabled } from "../services/db.js";
 
 function getPtyCount(): { used: number; max: number } {
   try {
@@ -21,6 +22,7 @@ function getPtyCount(): { used: number; max: number } {
 export function HotkeyHints() {
   const view = useStore((s) => s.view);
   const focusPane = useStore((s) => s.focusPane);
+  const activeRepo = useStore((s) => s.activeRepo);
   const activeTask = useStore((s) => s.activeTask);
   const addingRepo = useStore((s) => s.addingRepo);
   const gitStatuses = useStore((s) => s.gitStatuses);
@@ -68,6 +70,7 @@ export function HotkeyHints() {
         "co Codex",
         "l/o Switch",
         "r Refresh",
+        "y Linear",
         "Esc Back",
       );
     } else {
@@ -78,10 +81,13 @@ export function HotkeyHints() {
       }
     }
   } else if (view === "tasks") {
+    const showLinearIssueHotkey =
+      !!activeRepo && isProjectLinearEnabled(activeRepo.project_id);
     hints.push(
       "↑↓ Navigate",
       "⇧↑↓ Reorder",
       "⏎ Open",
+      ...(showLinearIssueHotkey ? ["p Open Issue"] : []),
       "x Close",
       "Ctrl+N New",
       "^A Adopt",

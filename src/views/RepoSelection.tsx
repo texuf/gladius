@@ -232,6 +232,7 @@ export function RepoSelection() {
       if (!repo) return;
       touchRepo(repo.id);
       setActiveRepo(repo);
+      setActiveTask(null);
       const tasks = getTasksForRepo(repo.id);
       setTasks(tasks);
       setView("tasks");

@@ -8,6 +8,7 @@ import type { Project, Repo, Task, TaskEvent } from "../store/types.js";
 const GLADIUS_DIR = join(homedir(), ".gladius");
 const DB_PATH = join(GLADIUS_DIR, "gladius.db");
 const CLEANUP_MIGRATION_KEY = "migration.cleanup_2026_02_27";
+const DEFAULT_LINEAR_TEAM = "";
 
 let db: Database;
 
@@ -49,6 +50,8 @@ function initSchema() {
       repo_id TEXT NOT NULL REFERENCES repos(id),
       label TEXT NOT NULL,
       description TEXT NOT NULL,
+      linear_issue_id TEXT,
+      linear_issue_started_at TEXT,
       status TEXT NOT NULL DEFAULT 'active',
       model TEXT,
       claude_session_id TEXT,
@@ -180,6 +183,8 @@ function migrateSchema() {
         repo_id TEXT NOT NULL REFERENCES repos(id),
         label TEXT NOT NULL,
         description TEXT NOT NULL,
+        linear_issue_id TEXT,
+        linear_issue_started_at TEXT,
         status TEXT NOT NULL DEFAULT 'active',
         model TEXT,
         claude_session_id TEXT,
@@ -199,6 +204,12 @@ function migrateSchema() {
   }
   if (!hasColumn("tasks", "codex_session_id")) {
     db.exec("ALTER TABLE tasks ADD COLUMN codex_session_id TEXT;");
+  }
+  if (!hasColumn("tasks", "linear_issue_id")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN linear_issue_id TEXT;");
+  }
+  if (!hasColumn("tasks", "linear_issue_started_at")) {
+    db.exec("ALTER TABLE tasks ADD COLUMN linear_issue_started_at TEXT;");
   }
 
   // In case repos were created without project bindings, assign a default.
@@ -276,6 +287,8 @@ function runOneTimeCleanupMigration(): void {
           repo_id TEXT NOT NULL REFERENCES repos(id),
           label TEXT NOT NULL,
           description TEXT NOT NULL,
+          linear_issue_id TEXT,
+          linear_issue_started_at TEXT,
           status TEXT NOT NULL DEFAULT 'active',
           model TEXT,
           claude_session_id TEXT,
@@ -289,7 +302,7 @@ function runOneTimeCleanupMigration(): void {
         );
 
         INSERT INTO tasks_clean (
-          id, repo_id, label, description, status, model,
+          id, repo_id, label, description, linear_issue_id, linear_issue_started_at, status, model,
           claude_session_id, codex_session_id,
           worktree_path, branch_name, sort_order,
           created_at, last_accessed_at, closed_at
@@ -299,6 +312,8 @@ function runOneTimeCleanupMigration(): void {
           repo_id,
           label,
           description,
+          NULL AS linear_issue_id,
+          NULL AS linear_issue_started_at,
           status,
           model,
           CASE
@@ -456,6 +471,19 @@ export function createProject(name: string, path?: string): Project {
 
 export function touchProject(id: string): void {
   touchProjectInternal(id);
+}
+
+export function isProjectLinearEnabled(projectId: string): boolean {
+  return getAppState(`project.linear.enabled.${projectId}`) === "1";
+}
+
+export function setProjectLinearEnabled(projectId: string, enabled: boolean): void {
+  setAppState(`project.linear.enabled.${projectId}`, enabled ? "1" : "0");
+}
+
+export function getProjectLinearTeam(projectId: string): string {
+  const configured = getAppState(`project.linear.team.${projectId}`);
+  return configured?.trim() || DEFAULT_LINEAR_TEAM;
 }
 
 // -- Repo CRUD --
@@ -714,6 +742,7 @@ export function createTask(
   description: string,
   branchName: string,
   worktreePath: string,
+  options?: { linearIssueId?: string | null },
 ): Task {
   const db = getDb();
   const now = new Date().toISOString();
@@ -729,6 +758,8 @@ export function createTask(
     repo_id: repoId,
     label,
     description,
+    linear_issue_id: options?.linearIssueId ?? null,
+    linear_issue_started_at: null,
     status: "active",
     model: null,
     claude_session_id: null,
@@ -742,13 +773,15 @@ export function createTask(
   };
 
   db.query(
-    `INSERT INTO tasks (id, repo_id, label, description, status, model, claude_session_id, codex_session_id, worktree_path, branch_name, sort_order, created_at, last_accessed_at, closed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, repo_id, label, description, linear_issue_id, linear_issue_started_at, status, model, claude_session_id, codex_session_id, worktree_path, branch_name, sort_order, created_at, last_accessed_at, closed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     task.id,
     task.repo_id,
     task.label,
     task.description,
+    task.linear_issue_id,
+    task.linear_issue_started_at,
     task.status,
     task.model,
     task.claude_session_id,
