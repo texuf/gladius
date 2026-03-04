@@ -11,6 +11,13 @@ export interface TaskPrompt {
   source: PromptSource;
 }
 
+export interface TaskConversationMessage {
+  role: "user" | "assistant";
+  text: string;
+  timestamp: string;
+  source: PromptSource;
+}
+
 const filePromptCache = new Map<string, { mtimeMs: number; prompt: TaskPrompt | null }>();
 const codexSessionPathCache = new Map<string, string | null>();
 
@@ -89,7 +96,10 @@ function extractClaudeMessageText(content: unknown): string | null {
   return parts.length > 0 ? parts.join(" ") : null;
 }
 
-function extractCodexMessageText(content: unknown): string | null {
+function extractCodexMessageText(
+  content: unknown,
+  role: "user" | "assistant" = "user",
+): string | null {
   if (typeof content === "string") {
     const text = sanitizePromptText(content);
     return text || null;
@@ -113,12 +123,17 @@ function extractCodexMessageText(content: unknown): string | null {
   }
 
   // Skip framework scaffolding when there is a real user prompt in the same message.
-  const userFacing = parts.filter(
-    (part) =>
-      !part.startsWith("# AGENTS.md instructions") &&
-      !part.startsWith("<environment_context>"),
-  );
-  const selected = userFacing.length > 0 ? userFacing : parts;
+  const selected =
+    role === "user"
+      ? (() => {
+          const userFacing = parts.filter(
+            (part) =>
+              !part.startsWith("# AGENTS.md instructions") &&
+              !part.startsWith("<environment_context>"),
+          );
+          return userFacing.length > 0 ? userFacing : parts;
+        })()
+      : parts;
   return selected.length > 0 ? selected.join(" ") : null;
 }
 
@@ -160,7 +175,7 @@ function parseCodexPromptFile(filePath: string): TaskPrompt | null {
     const payload = record.payload;
     if (!payload || payload.type !== "message" || payload.role !== "user") continue;
 
-    const text = extractCodexMessageText(payload.content);
+    const text = extractCodexMessageText(payload.content, "user");
     if (!text) continue;
 
     const timestamp = String(record.timestamp || "");
@@ -206,7 +221,7 @@ function parseCodexPromptsFromFile(filePath: string): TaskPrompt[] {
     const payload = record.payload;
     if (!payload || payload.type !== "message" || payload.role !== "user") continue;
 
-    const text = extractCodexMessageText(payload.content);
+    const text = extractCodexMessageText(payload.content, "user");
     if (!text) continue;
 
     const timestamp = String(record.timestamp || "");
@@ -214,6 +229,70 @@ function parseCodexPromptsFromFile(filePath: string): TaskPrompt[] {
   }
 
   return prompts;
+}
+
+function parseClaudeConversationFromFile(
+  filePath: string,
+): TaskConversationMessage[] {
+  const content = readFileSync(filePath, "utf8");
+  const lines = content.split("\n");
+  const messages: TaskConversationMessage[] = [];
+
+  for (const line of lines) {
+    if (!line) continue;
+    const record = safeParseJson(line);
+    if (!record) continue;
+    const role = String(record?.message?.role || "");
+    if (role !== "user" && role !== "assistant") continue;
+    if (record.type !== role) continue;
+
+    const text = extractClaudeMessageText(record.message.content);
+    if (!text) continue;
+
+    const timestamp = String(record.timestamp || "");
+    messages.push({
+      role: role as "user" | "assistant",
+      text,
+      timestamp,
+      source: "claude",
+    });
+  }
+
+  return messages;
+}
+
+function parseCodexConversationFromFile(
+  filePath: string,
+): TaskConversationMessage[] {
+  const content = readFileSync(filePath, "utf8");
+  const lines = content.split("\n");
+  const messages: TaskConversationMessage[] = [];
+
+  for (const line of lines) {
+    if (!line) continue;
+    const record = safeParseJson(line);
+    if (!record || record.type !== "response_item") continue;
+    const payload = record.payload;
+    const role = String(payload?.role || "");
+    if (!payload || payload.type !== "message") continue;
+    if (role !== "user" && role !== "assistant") continue;
+
+    const text = extractCodexMessageText(
+      payload.content,
+      role as "user" | "assistant",
+    );
+    if (!text) continue;
+
+    const timestamp = String(record.timestamp || "");
+    messages.push({
+      role: role as "user" | "assistant",
+      text,
+      timestamp,
+      source: "codex",
+    });
+  }
+
+  return messages;
 }
 
 function parsePromptFileCached(
@@ -358,4 +437,35 @@ export function getRecentTaskPrompts(task: Task, limit = 200): TaskPrompt[] {
   prompts.sort((a, b) => toTimestampMs(a.timestamp) - toTimestampMs(b.timestamp));
   if (limit <= 0 || prompts.length <= limit) return prompts;
   return prompts.slice(prompts.length - limit);
+}
+
+export function getRecentTaskConversation(
+  task: Task,
+  source?: PromptSource,
+  limit = 100,
+): TaskConversationMessage[] {
+  const messages: TaskConversationMessage[] = [];
+
+  if (!source || source === "claude") {
+    const claudeFile = resolveClaudeSessionFile(task);
+    if (claudeFile) {
+      try {
+        messages.push(...parseClaudeConversationFromFile(claudeFile));
+      } catch {}
+    }
+  }
+
+  if (!source || source === "codex") {
+    const codexFile = resolveCodexSessionFile(task);
+    if (codexFile) {
+      try {
+        messages.push(...parseCodexConversationFromFile(codexFile));
+      } catch {}
+    }
+  }
+
+  if (messages.length === 0) return [];
+  messages.sort((a, b) => toTimestampMs(a.timestamp) - toTimestampMs(b.timestamp));
+  if (limit <= 0 || messages.length <= limit) return messages;
+  return messages.slice(messages.length - limit);
 }

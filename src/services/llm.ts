@@ -40,6 +40,7 @@ export async function generatePrDescription(
   diffStat: string,
   taskDescription = "",
   recentPrompts = "",
+  recentLlmMessages = "",
 ): Promise<{ title: string; description: string }> {
   const prompt = `You are helping create a GitHub pull request. Based on the commit messages and diff stats below, generate a concise PR title and a clear description in markdown.
 
@@ -53,6 +54,9 @@ ${taskDescription || "[none]"}
 
 Recent user prompts:
 ${recentPrompts || "[none]"}
+
+Recent messages from active LLM session (user + assistant):
+${recentLlmMessages || "[none]"}
 
 Commit messages:
 ${commitMessages}

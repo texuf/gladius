@@ -14,7 +14,10 @@ import {
   createPullRequest,
 } from "../services/git.js";
 import { generatePrDescription } from "../services/llm.js";
-import { getRecentTaskPrompts } from "../services/taskPrompt.js";
+import {
+  getRecentTaskConversation,
+  getRecentTaskPrompts,
+} from "../services/taskPrompt.js";
 import type { Reviewer } from "../store/types.js";
 
 type Phase =
@@ -33,6 +36,7 @@ interface AddingReviewer {
 }
 
 const MAX_PR_PROMPTS_CHARS = 30_000;
+const MAX_PR_LLM_MESSAGES_CHARS = 30_000;
 const MAX_PR_DESCRIPTION_CHARS = 4_000;
 
 export function CreatePr() {
@@ -145,6 +149,8 @@ export function CreatePr() {
 
       const promptLines: string[] = [];
       let promptChars = 0;
+      const llmMessageLines: string[] = [];
+      let llmMessageChars = 0;
       if (activeTask) {
         const recentPrompts = getRecentTaskPrompts(activeTask, 300);
         for (let i = recentPrompts.length - 1; i >= 0; i--) {
@@ -155,6 +161,23 @@ export function CreatePr() {
           promptLines.unshift(line);
           promptChars += line.length;
         }
+
+        const activeSource =
+          activeTask.model === "claude" || activeTask.model === "codex"
+            ? activeTask.model
+            : undefined;
+        const recentLlmMessages = getRecentTaskConversation(
+          activeTask,
+          activeSource,
+          80,
+        );
+        for (let i = recentLlmMessages.length - 1; i >= 0; i--) {
+          const message = recentLlmMessages[i];
+          const line = `[${message.source} ${message.role} ${message.timestamp || "unknown"}] ${message.text}`;
+          if (llmMessageChars + line.length > MAX_PR_LLM_MESSAGES_CHARS) break;
+          llmMessageLines.unshift(line);
+          llmMessageChars += line.length;
+        }
       }
 
       const { title, description } = await generatePrDescription(
@@ -163,6 +186,7 @@ export function CreatePr() {
         diffStat,
         boundedTaskDescription,
         promptLines.join("\n"),
+        llmMessageLines.join("\n"),
       );
 
       const fixesId = activeTask?.linear_issue_id?.trim() || "";
