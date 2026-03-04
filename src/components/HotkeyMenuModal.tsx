@@ -104,6 +104,7 @@ export function HotkeyMenuModal({
         borderColor="yellow"
         paddingX={2}
         paddingY={1}
+        backgroundColor="black"
       >
         <Text bold color="yellow">
           {menu.title}

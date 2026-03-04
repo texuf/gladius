@@ -145,6 +145,7 @@ export interface AppState {
   activeRepo: Repo | null;
   activeTask: Task | null;
   selectedIndex: number;
+  pendingTaskListFocusId: string | null;
 
   // Modal
   modal: ModalState;
@@ -173,6 +174,7 @@ export interface AppState {
   setActiveRepo: (repo: Repo | null) => void;
   setActiveTask: (task: Task | null) => void;
   setSelectedIndex: (index: number) => void;
+  setPendingTaskListFocusId: (taskId: string | null) => void;
   setModal: (modal: ModalState) => void;
   setFocusPane: (pane: FocusPane) => void;
   setPrCommentsSelectionKind: (kind: PrCommentsSelectionKind) => void;

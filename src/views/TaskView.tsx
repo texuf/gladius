@@ -465,7 +465,7 @@ export function TaskView() {
     }
 
     // Close task
-    if ((input === "d" || input === "x") && !key.super && activeTask) {
+    if (input === "x" && !key.super && activeTask) {
       setModal({
         type: "confirm",
         message: `Close task '${activeTask.label}'? This will delete the worktree.`,
@@ -497,45 +497,6 @@ export function TaskView() {
           onConfirm: () => handleSquashMerge(pr.number),
         });
       }
-      return;
-    }
-
-    // Create PR / View PR / Clear merged PR
-    if (input === "p" && !key.super && activeTask?.worktree_path) {
-      const pr = gitStatuses[activeTask.id]?.pr;
-      const currentBranch = gitStatuses[activeTask.id]?.branch;
-      if (currentBranch === "main" || currentBranch === "master") return;
-      if (pr && pr.state === "open") {
-        void handleOpenPrInBrowser();
-      } else if (pr && pr.state === "merged") {
-        // Mark PR as cleared so polling doesn't bring it back
-        useStore.getState().markPrCleared(activeTask.id);
-        useStore.getState().setTaskStatuses({
-          ...useStore.getState().taskStatuses,
-          [activeTask.id]: "none",
-        });
-        // Remove PR from git status so the header clears immediately
-        const currentGitStatus = gitStatuses[activeTask.id];
-        if (currentGitStatus) {
-          useStore
-            .getState()
-            .setGitStatus(activeTask.id, { ...currentGitStatus, pr: null });
-        }
-      } else if (!pr) {
-        setView("createPr");
-      }
-      return;
-    }
-
-    // Open task worktree in Cursor
-    if (input === "n" && !key.super && !key.ctrl && activeTask?.worktree_path) {
-      void handleOpenCursor();
-      return;
-    }
-
-    // Open repo in Tower
-    if (input === "b" && !key.super && !key.ctrl && activeTask?.worktree_path) {
-      void handleOpenTower();
       return;
     }
 
@@ -635,31 +596,21 @@ export function TaskView() {
         return;
       }
 
-      const [trackedNameOnly, trackedDiff, untrackedNameOnly] =
-        await Promise.all([
-          // HEAD diff includes both staged and unstaged tracked changes.
-          $`git -C ${repoPath} diff --name-only HEAD --`.text(),
-          $`git -C ${repoPath} diff HEAD --`.text(),
-          $`git -C ${repoPath} ls-files --others --exclude-standard`.text(),
-        ]);
-
-      const trackedFiles = new Set(
-        trackedNameOnly
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean),
-      );
-      if (trackedFiles.size === 0) {
-        setActionError(
-          "Only untracked files are changed; gc uses git commit -am.",
-        );
-        return;
-      }
+      const [stagedDiff, unstagedDiff, untrackedNameOnly] = await Promise.all([
+        $`git -C ${repoPath} diff --cached --`.text(),
+        $`git -C ${repoPath} diff --`.text(),
+        $`git -C ${repoPath} ls-files --others --exclude-standard`.text(),
+      ]);
 
       const diffSections: string[] = [];
-      if (trackedDiff.trim()) {
+      if (stagedDiff.trim()) {
         diffSections.push(
-          `### Tracked diff (HEAD..working tree)\n${trackedDiff.trim()}`,
+          `### Staged diff (HEAD..index)\n${stagedDiff.trim()}`,
+        );
+      }
+      if (unstagedDiff.trim()) {
+        diffSections.push(
+          `### Unstaged diff (index..working tree)\n${unstagedDiff.trim()}`,
         );
       }
 
@@ -692,6 +643,10 @@ export function TaskView() {
       }
 
       const combinedDiff = diffSections.join("\n\n");
+      if (!combinedDiff.trim()) {
+        setActionError("No commit content found.");
+        return;
+      }
       const boundedDiff =
         combinedDiff.length > MAX_DIFF_CHARS
           ? `${combinedDiff.slice(0, MAX_DIFF_CHARS)}\n\n[diff truncated]`
@@ -721,7 +676,8 @@ export function TaskView() {
         boundedDiff,
       );
 
-      await $`git -C ${repoPath} commit -am ${commitMsg}`.text();
+      await $`git -C ${repoPath} add -A --`.text();
+      await $`git -C ${repoPath} commit -m ${commitMsg}`.text();
       const [commitSha, branch] = await Promise.all([
         $`git -C ${repoPath} rev-parse --short HEAD`.text(),
         $`git -C ${repoPath} rev-parse --abbrev-ref HEAD`.text(),
