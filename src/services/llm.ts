@@ -38,6 +38,8 @@ export async function generatePrDescription(
   apiKey: string,
   commitMessages: string,
   diffStat: string,
+  taskDescription = "",
+  recentPrompts = "",
 ): Promise<{ title: string; description: string }> {
   const prompt = `You are helping create a GitHub pull request. Based on the commit messages and diff stats below, generate a concise PR title and a clear description in markdown.
 
@@ -45,6 +47,12 @@ Format your response EXACTLY as:
 TITLE: <one-line title, max 72 chars>
 DESCRIPTION:
 <markdown description with a summary section and list of changes>
+
+Task description:
+${taskDescription || "[none]"}
+
+Recent user prompts:
+${recentPrompts || "[none]"}
 
 Commit messages:
 ${commitMessages}

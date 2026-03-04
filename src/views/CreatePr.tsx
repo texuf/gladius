@@ -14,6 +14,7 @@ import {
   createPullRequest,
 } from "../services/git.js";
 import { generatePrDescription } from "../services/llm.js";
+import { getRecentTaskPrompts } from "../services/taskPrompt.js";
 import type { Reviewer } from "../store/types.js";
 
 type Phase =
@@ -30,6 +31,9 @@ interface AddingReviewer {
   step: "name" | "handle";
   name: string;
 }
+
+const MAX_PR_PROMPTS_CHARS = 30_000;
+const MAX_PR_DESCRIPTION_CHARS = 4_000;
 
 export function CreatePr() {
   const activeTask = useStore((s) => s.activeTask);
@@ -134,7 +138,32 @@ export function CreatePr() {
         return;
       }
 
-      const { title, description } = await generatePrDescription(apiKey, commitLog, diffStat);
+      const taskDescription = (activeTask?.description || "").trim();
+      const boundedTaskDescription = taskDescription.length > MAX_PR_DESCRIPTION_CHARS
+        ? `${taskDescription.slice(0, MAX_PR_DESCRIPTION_CHARS)}...`
+        : taskDescription;
+
+      const promptLines: string[] = [];
+      let promptChars = 0;
+      if (activeTask) {
+        const recentPrompts = getRecentTaskPrompts(activeTask, 300);
+        for (let i = recentPrompts.length - 1; i >= 0; i--) {
+          const prompt = recentPrompts[i];
+          const line =
+            `[${prompt.source} ${prompt.timestamp || "unknown"}] ${prompt.text}`;
+          if (promptChars + line.length > MAX_PR_PROMPTS_CHARS) break;
+          promptLines.unshift(line);
+          promptChars += line.length;
+        }
+      }
+
+      const { title, description } = await generatePrDescription(
+        apiKey,
+        commitLog,
+        diffStat,
+        boundedTaskDescription,
+        promptLines.join("\n"),
+      );
       setPrTitle(title);
       setPrDescription(description);
       // Skip confirmation — go straight to creating the PR
