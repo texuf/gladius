@@ -38,7 +38,11 @@ export function TaskStatusPane({ task }: { task: Task }) {
 
   useEffect(() => {
     const refreshPrompt = () => {
-      const prompt = getLatestTaskPrompt(task);
+      const selectedSource =
+        task.model === "claude" || task.model === "codex"
+          ? task.model
+          : undefined;
+      const prompt = getLatestTaskPrompt(task, selectedSource);
       if (!prompt) {
         setLatestPrompt(null);
         return;
@@ -52,7 +56,13 @@ export function TaskStatusPane({ task }: { task: Task }) {
     refreshPrompt();
     const interval = setInterval(refreshPrompt, PROMPT_REFRESH_MS);
     return () => clearInterval(interval);
-  }, [task.id, task.worktree_path, task.claude_session_id, task.codex_session_id]);
+  }, [
+    task.id,
+    task.model,
+    task.worktree_path,
+    task.claude_session_id,
+    task.codex_session_id,
+  ]);
 
   const statusText = useMemo(() => {
     if (!latestPrompt) return "No prompt captured yet.";

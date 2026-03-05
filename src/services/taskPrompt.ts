@@ -3,7 +3,7 @@ import { homedir } from "os";
 import { join } from "path";
 import type { Task } from "../store/types.js";
 
-type PromptSource = "claude" | "codex";
+export type PromptSource = "claude" | "codex";
 
 export interface TaskPrompt {
   text: string;
@@ -394,19 +394,26 @@ function resolveCodexSessionFile(task: Task): string | null {
   return null;
 }
 
-export function getLatestTaskPrompt(task: Task): TaskPrompt | null {
+export function getLatestTaskPrompt(
+  task: Task,
+  source?: PromptSource,
+): TaskPrompt | null {
   const candidates: TaskPrompt[] = [];
 
-  const claudeFile = resolveClaudeSessionFile(task);
-  if (claudeFile) {
-    const prompt = parsePromptFileCached(claudeFile, parseClaudePromptFile);
-    if (prompt) candidates.push(prompt);
+  if (!source || source === "claude") {
+    const claudeFile = resolveClaudeSessionFile(task);
+    if (claudeFile) {
+      const prompt = parsePromptFileCached(claudeFile, parseClaudePromptFile);
+      if (prompt) candidates.push(prompt);
+    }
   }
 
-  const codexFile = resolveCodexSessionFile(task);
-  if (codexFile) {
-    const prompt = parsePromptFileCached(codexFile, parseCodexPromptFile);
-    if (prompt) candidates.push(prompt);
+  if (!source || source === "codex") {
+    const codexFile = resolveCodexSessionFile(task);
+    if (codexFile) {
+      const prompt = parsePromptFileCached(codexFile, parseCodexPromptFile);
+      if (prompt) candidates.push(prompt);
+    }
   }
 
   if (candidates.length === 0) return null;
