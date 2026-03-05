@@ -2,6 +2,8 @@ import { $ } from "bun";
 import type {
   GitStatus,
   PrStatus,
+  PrReadiness,
+  TaskStatusColor,
   ReviewThread,
   CiCheckFailure,
 } from "../store/types.js";
@@ -23,6 +25,37 @@ const prStatusInFlightByRemote = new Map<
 type PrCandidate = PrStatus & {
   updatedAtMs: number;
 };
+
+function getPrReadiness(pr: {
+  state: "open" | "closed" | "merged";
+  hasConflicts: boolean;
+  unresolvedThreads: number;
+  ciFailed: number;
+  ciPending: number;
+}): PrReadiness {
+  if (pr.state === "merged") return "merged";
+  if (pr.state !== "open") return "none";
+  if (pr.ciPending > 0) return "ciPending";
+  if (pr.hasConflicts || pr.unresolvedThreads > 0 || pr.ciFailed > 0) {
+    return "attentionNeeded";
+  }
+  return "readyToMerge";
+}
+
+function prReadinessToColor(readiness: PrReadiness): TaskStatusColor {
+  switch (readiness) {
+    case "merged":
+      return "purple";
+    case "ciPending":
+      return "yellow";
+    case "attentionNeeded":
+      return "red";
+    case "readyToMerge":
+      return "green";
+    default:
+      return "none";
+  }
+}
 
 /**
  * Get git status information for a given repo path.
@@ -222,12 +255,22 @@ async function getOpenPrStatusesForRepo(
         const unresolvedThreads = threads.filter(
           (t: any) => !t?.isResolved,
         ).length;
+        const hasConflicts = isConflicting(pr?.mergeable);
+        const readiness = getPrReadiness({
+          state,
+          hasConflicts,
+          unresolvedThreads,
+          ciFailed,
+          ciPending,
+        });
 
         const candidate: PrCandidate = {
           number: pr.number,
           title: pr?.title ?? "",
           state,
-          hasConflicts: isConflicting(pr?.mergeable),
+          readiness,
+          statusColor: prReadinessToColor(readiness),
+          hasConflicts,
           unresolvedThreads,
           ciPassed,
           ciFailed,

@@ -1,8 +1,16 @@
 import { $ } from "bun";
 import { getAllActiveTasks, updateTask } from "./db.js";
 import { getGitStatusWithPr } from "./git.js";
+import { getRecentTaskConversation } from "./taskPrompt.js";
 import { useStore } from "../store/index.js";
-import type { GitStatus, TaskStatusColor } from "../store/types.js";
+import type {
+  GitStatus,
+  GitWorkStatus,
+  LlmActivityStatus,
+  PrReadiness,
+  Task,
+  TaskStatusColor,
+} from "../store/types.js";
 
 const TMUX_SOCKET = "gladius";
 
@@ -19,31 +27,110 @@ async function captureTmuxPane(sessionName: string): Promise<string | null> {
   }
 }
 
-/**
- * Determine LLM status for a task by checking its console tmux session.
- * - "esc to interrupt" present → orange (working)
- * - Session alive but no indicator → red (needs input)
- * - No session → null (no LLM running)
- */
-async function getLlmStatus(taskId: string): Promise<"orange" | "red" | null> {
-  const sessionName = `gladius-${taskId}-console`;
-  const content = await captureTmuxPane(sessionName);
-  if (content === null) return null;
+type LlmContext = Pick<
+  Task,
+  "id" | "model" | "worktree_path" | "claude_session_id" | "codex_session_id"
+>;
 
-  if (content.includes("esc to interrupt")) {
-    return "orange";
+function toTimestampMs(timestamp: string): number {
+  const parsed = Date.parse(timestamp);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getGitWorkStatus(gitStatus: GitStatus | null): GitWorkStatus {
+  return (gitStatus?.changedFiles ?? 0) > 0 ? "dirty" : "clean";
+}
+
+function inferLlmWorkingFromPane(content: string): boolean {
+  const recent = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-4)
+    .join(" ")
+    .toLowerCase();
+
+  if (!recent) return false;
+  return (
+    recent.includes("running…") ||
+    recent.includes("running...") ||
+    recent.includes("thinking") ||
+    recent.includes("processing")
+  );
+}
+
+function toPromptTask(context: LlmContext): Task {
+  return {
+    id: context.id,
+    repo_id: "",
+    label: "",
+    description: "",
+    linear_issue_id: null,
+    linear_issue_started_at: null,
+    status: "active",
+    model: context.model,
+    claude_session_id: context.claude_session_id,
+    codex_session_id: context.codex_session_id,
+    worktree_path: context.worktree_path,
+    branch_name: null,
+    sort_order: 0,
+    created_at: "",
+    last_accessed_at: "",
+    closed_at: null,
+  };
+}
+
+async function getLlmActivityStatus(task: LlmContext): Promise<LlmActivityStatus> {
+  if (task.model !== "claude" && task.model !== "codex") return "idle";
+
+  const messages = getRecentTaskConversation(
+    toPromptTask(task),
+    task.model,
+    80,
+  );
+  if (messages.length > 0) {
+    let lastUserMs = 0;
+    let lastAssistantMs = 0;
+    for (const msg of messages) {
+      const ts = toTimestampMs(msg.timestamp);
+      if (msg.role === "user") lastUserMs = Math.max(lastUserMs, ts);
+      if (msg.role === "assistant") lastAssistantMs = Math.max(lastAssistantMs, ts);
+    }
+    return lastUserMs > lastAssistantMs ? "working" : "idle";
   }
-  return "red";
+
+  // Fallback for sessions with no parseable message history yet.
+  const content = await captureTmuxPane(`gladius-${task.id}-console`);
+  if (!content) return "idle";
+  return inferLlmWorkingFromPane(content) ? "working" : "idle";
+}
+
+function resolveCombinedTaskColor(params: {
+  prReadiness: PrReadiness;
+  gitStatus: GitWorkStatus;
+  llmStatus: LlmActivityStatus;
+  consoleInteracted: boolean;
+  consoleFocused: boolean;
+}): TaskStatusColor {
+  if (params.llmStatus === "working") {
+    return params.consoleFocused || params.consoleInteracted ? "yellow" : "orange";
+  }
+
+  if (params.prReadiness === "merged") return "purple";
+  if (params.prReadiness === "attentionNeeded") return "red";
+  if (params.prReadiness === "ciPending") return "yellow";
+
+  if (params.prReadiness === "readyToMerge") {
+    return params.gitStatus === "clean" ? "green" : "yellow";
+  }
+
+  if (params.gitStatus === "dirty") return "orange";
+  return "none";
 }
 
 /**
  * Compute status color for a single task.
- * Priority: yellow (user interacting / LLM processing after input) >
- *           orange (LLM working) > red (needs attention) > green (PR green) > none
- *
- * consoleInteracted = user recently focused the console for this task.
- * While interacted: orange (LLM working) → yellow (user just gave input, LLM processing).
- * When LLM becomes idle (red) → clear the flag, show red.
+ * Final color is derived from explicit PR/Git/LLM states.
  */
 export async function computeTaskStatus(
   taskId: string,
@@ -53,7 +140,15 @@ export async function computeTaskStatus(
   consoleInteracted: boolean,
   consoleFocused: boolean,
 ): Promise<TaskStatusColor> {
-  const llmStatus = model ? await getLlmStatus(taskId) : null;
+  const normalizedModel =
+    model === "claude" || model === "codex" ? model : null;
+  const llmStatus = await getLlmActivityStatus({
+    id: taskId,
+    model: normalizedModel,
+    worktree_path: worktreePath,
+    claude_session_id: null,
+    codex_session_id: null,
+  });
   let gitStatus: GitStatus | null = null;
   if (worktreePath) {
     try {
@@ -102,7 +197,7 @@ export async function refreshAllTaskStatuses(options?: {
 
   await Promise.all(
     tasks.map(async (task) => {
-      const llmStatus = task.model ? await getLlmStatus(task.id) : null;
+      const llmStatus = await getLlmActivityStatus(task);
       let gitStatus: GitStatus | null = null;
 
       if (task.worktree_path) {
@@ -145,42 +240,32 @@ export async function refreshAllTaskStatuses(options?: {
 
 function resolveTaskStatusColor(
   taskId: string,
-  llmStatus: "orange" | "red" | null,
+  llmStatus: LlmActivityStatus,
   gitStatus: GitStatus | null,
   consoleInteracted: boolean,
   consoleFocused: boolean,
 ): TaskStatusColor {
-  if (consoleFocused) return "yellow";
-
-  if (consoleInteracted) {
-    if (llmStatus === "orange") return "yellow";
+  let interacted = consoleInteracted;
+  if (interacted && llmStatus === "idle") {
     useStore.getState().clearConsoleInteracted(taskId);
+    interacted = false;
   }
-
-  if (llmStatus === "orange") return "orange";
 
   const prCleared = useStore.getState().clearedPrTasks.has(taskId);
   const pr = gitStatus?.pr;
-  if (pr) {
-    // If user cleared a merged PR, ignore it (but respect new open PRs)
-    if (prCleared && pr.state === "merged") {
-      // skip PR status
-    } else {
-      if (pr.state === "open") {
-        // New open PR appeared — auto-clear the "cleared" flag
-        if (prCleared) useStore.getState().clearPrCleared(taskId);
-        if (pr.hasConflicts || pr.unresolvedThreads > 0 || pr.ciFailed > 0) {
-          return "red";
-        }
-        if (pr.ciPending > 0) return "yellow";
-        if (!pr.hasConflicts && pr.ciFailed === 0 && pr.unresolvedThreads === 0) {
-          return "green";
-        }
-      }
-      if (pr.state === "merged") return "purple";
-    }
+  let prReadiness: PrReadiness = pr?.readiness ?? "none";
+  if (pr?.state === "open" && prCleared) {
+    useStore.getState().clearPrCleared(taskId);
+  }
+  if (prCleared && prReadiness === "merged") {
+    prReadiness = "none";
   }
 
-  if (llmStatus === "red") return "red";
-  return "none";
+  return resolveCombinedTaskColor({
+    prReadiness,
+    gitStatus: getGitWorkStatus(gitStatus),
+    llmStatus,
+    consoleInteracted: interacted,
+    consoleFocused,
+  });
 }

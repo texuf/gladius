@@ -50,10 +50,22 @@ export interface TaskEvent {
   created_at: string;
 }
 
+export type PrReadiness =
+  | "none"
+  | "ciPending"
+  | "attentionNeeded"
+  | "readyToMerge"
+  | "merged";
+
+export type GitWorkStatus = "clean" | "dirty";
+export type LlmActivityStatus = "working" | "idle";
+
 export interface PrStatus {
   number: number;
   title: string;
   state: "open" | "closed" | "merged";
+  readiness: PrReadiness;
+  statusColor: TaskStatusColor;
   hasConflicts: boolean;
   unresolvedThreads: number;
   ciPassed: number;

@@ -106,19 +106,9 @@ export function HotkeyHints() {
         ? ["c Console"]
         : ["c Console (pick model)"];
       const pr = activeTask && gitStatuses[activeTask.id]?.pr;
-      const hasIssues =
-        pr &&
-        (pr.hasConflicts ||
-          pr.unresolvedThreads > 0 ||
-          pr.ciFailed > 0 ||
-          pr.ciPending > 0);
-      const isGreen =
-        pr &&
-        pr.state === "open" &&
-        !pr.hasConflicts &&
-        pr.ciFailed === 0 &&
-        pr.ciPending === 0 &&
-        pr.unresolvedThreads === 0;
+      const prColor = pr?.statusColor ?? "none";
+      const hasIssues = prColor === "red" || prColor === "yellow";
+      const isGreen = prColor === "green";
       const prHints = hasIssues ? ["v PR Issues"] : [];
       const mergeHints = isGreen ? ["s Squash Merge"] : [];
       hints.push(

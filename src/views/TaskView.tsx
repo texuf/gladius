@@ -67,10 +67,7 @@ export function TaskView() {
 
   const markConsoleInteracted = (taskId: string) => {
     useStore.getState().markConsoleInteracted(taskId);
-    useStore.getState().setTaskStatuses({
-      ...useStore.getState().taskStatuses,
-      [taskId]: "yellow",
-    });
+    void refreshAllTaskStatuses();
   };
 
   const resetDeadConsoleSession = () => {
@@ -803,6 +800,7 @@ export function TaskView() {
   if (!activeTask) return null;
 
   const gitStatus = gitStatuses[activeTask.id];
+  const prTaskColor = gitStatus?.pr?.statusColor ?? "none";
   const isEvenWithTracking =
     !!gitStatus &&
     gitStatus.hasTrackingBranch &&
@@ -876,15 +874,11 @@ export function TaskView() {
               {gitStatus?.pr && (
                 <Text
                   color={
-                    gitStatus.pr.ciPending > 0
-                      ? "yellow"
-                      : gitStatus.pr.hasConflicts ||
-                          gitStatus.pr.ciFailed > 0 ||
-                          gitStatus.pr.unresolvedThreads > 0
-                        ? "red"
-                        : gitStatus.pr.state === "merged"
-                          ? "magenta"
-                          : "green"
+                    prTaskColor === "purple"
+                      ? "magenta"
+                      : prTaskColor === "none"
+                        ? "white"
+                        : prTaskColor
                   }
                 >
                   {" "}
