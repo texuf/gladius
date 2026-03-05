@@ -95,7 +95,8 @@ export type ViewState =
   | "settings"
   | "createPr"
   | "standup"
-  | "adoptBranch";
+  | "adoptBranch"
+  | "adoptCommit";
 
 export type FocusPane = "none" | "notes" | "terminal" | "console";
 export type PrCommentsSelectionKind = "none" | "ci" | "thread";

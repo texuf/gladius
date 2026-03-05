@@ -43,7 +43,7 @@ export function HotkeyHints() {
 
   if (modal?.type === "hotkeyMenu") {
     hints.push("↑↓ Navigate", "⏎ Select", "Esc Cancel");
-  } else if (view === "adoptBranch") {
+  } else if (view === "adoptBranch" || view === "adoptCommit") {
     hints.push("⏎ Submit", "Esc Cancel");
   } else if (view === "taskSwitcher") {
     hints.push("↑↓ Navigate", "⏎ Switch", "Esc Cancel");
@@ -94,6 +94,7 @@ export function HotkeyHints() {
       "x Close",
       "Ctrl+N New",
       "^A Adopt",
+      "^S From Commit",
       "/ Search",
       "Ctrl+O Projects",
     );
