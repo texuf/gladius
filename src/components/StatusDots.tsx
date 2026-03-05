@@ -35,7 +35,7 @@ export function StatusDots({ green = 0, red = 0, orange = 0, yellow = 0, purple 
   }
   if (yellow > 0) {
     parts.push(
-      <Text key="yellow" color="yellow">
+      <Text key="yellow" color="#E6D87A">
         {"●".repeat(yellow)}
       </Text>
     );
