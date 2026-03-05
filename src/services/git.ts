@@ -723,10 +723,19 @@ function extractFailedStepLog(
     const lower = raw.toLowerCase();
     if (!lower) continue;
 
+    // Skip lines that are passing/skipped results — test names can contain
+    // words like "Fail" which would otherwise false-positive on strong patterns.
+    const contentAfterMarkers = raw
+      .replace(/^##\[(?:group|endgroup)\]\s*/, "")
+      .trimStart();
+    const isPassResult =
+      /^---\s+PASS\b/i.test(contentAfterMarkers) ||
+      /^(?:PASS|SKIP)\b/i.test(contentAfterMarkers);
+
     const isErrorMarker =
       lower.includes("##[error]") || lower.startsWith("error:");
     const isGeneric = isGenericErrorLine(raw);
-    const isStrong = isStrongErrorLine(raw);
+    const isStrong = !isPassResult && isStrongErrorLine(raw);
 
     if (isStrong && firstStrongError === -1) {
       firstStrongError = i;
