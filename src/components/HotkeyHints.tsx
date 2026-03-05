@@ -116,6 +116,7 @@ export function HotkeyHints() {
         "t Terminal",
         "o Open",
         "g Git",
+        "l LazyGit",
         ...modelHints,
         ...prHints,
         ...mergeHints,
@@ -131,6 +132,8 @@ export function HotkeyHints() {
         hints.push("Ctrl+] Send Esc");
       }
     }
+  } else if (view === "taskLazygit") {
+    hints.push("Esc Back", "Ctrl+] Send Esc");
   } else if (view === "standup") {
     hints.push("c Copy", "r Regenerate", "Esc Back");
   } else if (view === "createPr") {

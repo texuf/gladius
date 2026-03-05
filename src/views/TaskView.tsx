@@ -487,6 +487,12 @@ export function TaskView() {
       return;
     }
 
+    if (input === "l" && !key.super) {
+      setFocusPane("none");
+      setView("taskLazygit");
+      return;
+    }
+
     if (input === "g" && !key.super) {
       void openGitMenu();
       return;
@@ -891,7 +897,7 @@ export function TaskView() {
         <Box gap={1}>
           <StatusDots {...allDots} />
           <Text dimColor color="yellow">
-            o: Open g: Git c: Console
+            o: Open g: Git l: LazyGit c: Console
           </Text>
         </Box>
       </Box>

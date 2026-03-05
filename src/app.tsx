@@ -11,6 +11,7 @@ import { RepoSelection } from "./views/RepoSelection.js";
 import { ProjectView } from "./views/ProjectView.js";
 import { TaskList } from "./views/TaskList.js";
 import { TaskView } from "./views/TaskView.js";
+import { TaskLazygit } from "./views/TaskLazygit.js";
 import { TaskSwitcher } from "./views/TaskSwitcher.js";
 import { PrComments } from "./views/PrComments.js";
 import { Settings } from "./views/Settings.js";
@@ -63,6 +64,7 @@ export function App() {
             ? "projectView"
             : "projects";
       case "taskView":
+      case "taskLazygit":
       case "prComments":
       case "createPr":
         if (hasTask) return preferred;
@@ -231,6 +233,8 @@ export function App() {
         return <TaskList />;
       case "taskView":
         return <TaskView />;
+      case "taskLazygit":
+        return <TaskLazygit />;
       case "taskSwitcher":
         return <TaskSwitcher />;
       case "prComments":

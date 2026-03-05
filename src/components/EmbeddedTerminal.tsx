@@ -50,6 +50,39 @@ function cellToAnsi(
   const underline = cell.isUnderline();
   const inverse = cell.isInverse();
 
+  const appendColorCodes = (
+    mode: number,
+    value: number,
+    isForeground: boolean,
+  ) => {
+    const prefix = isForeground ? 38 : 48;
+    const isPalette16 = mode === 3 || mode === 16777216;
+    const isPalette256 = mode === 1 || mode === 33554432;
+    const isRgb = mode === 2 || mode === 50331648;
+
+    if (isPalette256) {
+      codes.push(prefix, 5, value);
+      return;
+    }
+    if (isRgb) {
+      codes.push(
+        prefix,
+        2,
+        (value >> 16) & 0xff,
+        (value >> 8) & 0xff,
+        value & 0xff,
+      );
+      return;
+    }
+    if (isPalette16) {
+      if (isForeground) {
+        codes.push(value < 8 ? 30 + value : 90 + (value - 8));
+      } else {
+        codes.push(value < 8 ? 40 + value : 100 + (value - 8));
+      }
+    }
+  };
+
   if (!prevCell) {
     if (bold) codes.push(1);
     if (dim) codes.push(2);
@@ -57,21 +90,8 @@ function cellToAnsi(
     if (underline) codes.push(4);
     if (inverse) codes.push(7);
 
-    if (fgMode === 1) codes.push(38, 5, fg);
-    else if (fgMode === 2)
-      codes.push(38, 2, (fg >> 16) & 0xff, (fg >> 8) & 0xff, fg & 0xff);
-    else if (fgMode === 3) {
-      if (fg < 8) codes.push(30 + fg);
-      else codes.push(90 + (fg - 8));
-    }
-
-    if (bgMode === 1) codes.push(48, 5, bg);
-    else if (bgMode === 2)
-      codes.push(48, 2, (bg >> 16) & 0xff, (bg >> 8) & 0xff, bg & 0xff);
-    else if (bgMode === 3) {
-      if (bg < 8) codes.push(40 + bg);
-      else codes.push(100 + (bg - 8));
-    }
+    appendColorCodes(fgMode, fg, true);
+    appendColorCodes(bgMode, bg, false);
   } else {
     const changed =
       fg !== prevCell.getFgColor() ||
@@ -93,21 +113,8 @@ function cellToAnsi(
     if (underline) codes.push(4);
     if (inverse) codes.push(7);
 
-    if (fgMode === 1) codes.push(38, 5, fg);
-    else if (fgMode === 2)
-      codes.push(38, 2, (fg >> 16) & 0xff, (fg >> 8) & 0xff, fg & 0xff);
-    else if (fgMode === 3) {
-      if (fg < 8) codes.push(30 + fg);
-      else codes.push(90 + (fg - 8));
-    }
-
-    if (bgMode === 1) codes.push(48, 5, bg);
-    else if (bgMode === 2)
-      codes.push(48, 2, (bg >> 16) & 0xff, (bg >> 8) & 0xff, bg & 0xff);
-    else if (bgMode === 3) {
-      if (bg < 8) codes.push(40 + bg);
-      else codes.push(100 + (bg - 8));
-    }
+    appendColorCodes(fgMode, fg, true);
+    appendColorCodes(bgMode, bg, false);
   }
 
   if (codes.length === 0) return "";
