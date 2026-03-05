@@ -31,6 +31,11 @@ type TaskListRow =
   | { kind: "linear"; issue: LinearIssue }
   | { kind: "task"; task: Task };
 
+function getTaskListRowKey(row: TaskListRow | undefined): string | null {
+  if (!row) return null;
+  return row.kind === "linear" ? `linear:${row.issue.id}` : `task:${row.task.id}`;
+}
+
 function formatClosedDate(closedAt: string | null): string {
   if (!closedAt) return "";
   const d = new Date(closedAt);
@@ -70,6 +75,8 @@ export function TaskList() {
   const [linearIssues, setLinearIssues] = useState<LinearIssue[]>([]);
   const [linearLoading, setLinearLoading] = useState(false);
   const activeTask = useStore((s) => s.activeTask);
+  const userNavigatedRef = useRef(false);
+  const selectedRowKeyRef = useRef<string | null>(null);
 
   const linearEnabled = !!activeRepo && isProjectLinearEnabled(activeRepo.project_id);
   const linearTeam = activeRepo ? getProjectLinearTeam(activeRepo.project_id) : "hnt-labs";
@@ -160,12 +167,44 @@ export function TaskList() {
   const initializedSelectionRef = useRef(false);
   useEffect(() => {
     initializedSelectionRef.current = false;
+    userNavigatedRef.current = false;
+    selectedRowKeyRef.current = null;
   }, [activeRepo?.id]);
+
+  // Track the selected row identity based on explicit index moves.
+  useEffect(() => {
+    selectedRowKeyRef.current = getTaskListRowKey(rows[selectedIndex]);
+  }, [selectedIndex]);
+
+  // Keep selection anchored to the same row identity when linear/task rows shift.
+  useEffect(() => {
+    const selectedKey = selectedRowKeyRef.current;
+    if (!selectedKey) return;
+
+    const currentKey = getTaskListRowKey(rows[selectedIndex]);
+    if (currentKey === selectedKey) return;
+
+    const remappedIndex = rows.findIndex(
+      (row) => getTaskListRowKey(row) === selectedKey,
+    );
+    if (remappedIndex >= 0 && remappedIndex !== selectedIndex) {
+      setSelectedIndex(remappedIndex);
+      return;
+    }
+    if (remappedIndex < 0) {
+      selectedRowKeyRef.current = currentKey;
+    }
+  }, [rows, selectedIndex, setSelectedIndex]);
+
   useEffect(() => {
     if (initializedSelectionRef.current) return;
     if (linearEnabled && linearLoading) return;
 
     initializedSelectionRef.current = true;
+
+    if (userNavigatedRef.current) {
+      return;
+    }
 
     if (activeTask) {
       const idx = rows.findIndex(
@@ -203,8 +242,10 @@ export function TaskList() {
     const maxRowIndex = Math.max(0, rows.length - 1);
 
     if (key.upArrow && !key.shift) {
+      userNavigatedRef.current = true;
       setSelectedIndex(Math.max(0, selectedIndex - 1));
     } else if (key.downArrow && !key.shift) {
+      userNavigatedRef.current = true;
       setSelectedIndex(Math.min(maxRowIndex, selectedIndex + 1));
     } else if (key.upArrow && key.shift) {
       if (!selectedTask || selectedTask.status !== "active") return;
@@ -215,6 +256,7 @@ export function TaskList() {
         activeTasks[activeIdx].id,
         activeTasks[activeIdx - 1].id,
       );
+      userNavigatedRef.current = true;
       reloadTasks();
       setSelectedIndex(visibleLinearIssues.length + activeIdx - 1);
     } else if (key.downArrow && key.shift) {
@@ -226,6 +268,7 @@ export function TaskList() {
         activeTasks[activeIdx].id,
         activeTasks[activeIdx + 1].id,
       );
+      userNavigatedRef.current = true;
       reloadTasks();
       setSelectedIndex(visibleLinearIssues.length + activeIdx + 1);
     } else if (key.return && selectedRow?.kind === "linear") {
