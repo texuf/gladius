@@ -28,7 +28,11 @@ import {
   getTasksForRepo,
 } from "../services/db.js";
 import { deleteWorktree } from "../services/worktree.js";
-import { destroySession, isSessionDead } from "../services/terminalManager.js";
+import {
+  destroySession,
+  getSession,
+  isSessionDead,
+} from "../services/terminalManager.js";
 import { StatusDots } from "../components/StatusDots.js";
 import { getRecentTaskPrompts } from "../services/taskPrompt.js";
 
@@ -176,6 +180,23 @@ export function TaskView() {
       if (gitIntervalRef.current) clearInterval(gitIntervalRef.current);
       if (prIntervalRef.current) clearInterval(prIntervalRef.current);
     };
+  }, [activeTask?.id]);
+
+  // When opening a task, jump directly to console if an LLM session already exists.
+  useEffect(() => {
+    if (!activeTask) return;
+    if (focusPane !== "none") return;
+    if (!activeTask.model) return;
+
+    const hasPersistedSession =
+      (activeTask.model === "claude" && !!activeTask.claude_session_id) ||
+      (activeTask.model === "codex" && !!activeTask.codex_session_id);
+    const hasLiveSession = !!getSession(`${activeTask.id}-console`);
+
+    if (hasPersistedSession || hasLiveSession) {
+      setFocusPane("console");
+      markConsoleInteracted(activeTask.id);
+    }
   }, [activeTask?.id]);
 
   // Pause/resume polling when copy mode toggles

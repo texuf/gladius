@@ -27,26 +27,35 @@ export function TextInputField({
 
   return (
     <Box
-      flexDirection="column"
-      borderStyle="double"
-      borderColor="cyan"
-      paddingX={2}
-      paddingY={1}
+      position="absolute"
+      width="100%"
+      height="100%"
+      justifyContent="center"
+      alignItems="center"
     >
-      <Text bold color="cyan">
-        {label}
-      </Text>
-      <Box marginTop={1}>
-        <Text>&gt; </Text>
-        <InkTextInput
-          value={value}
-          onChange={onChange}
-          onSubmit={onSubmit}
-          placeholder={placeholder}
-        />
-      </Box>
-      <Box marginTop={1}>
-        <Text dimColor>⏎ Submit  Esc Cancel</Text>
+      <Box
+        flexDirection="column"
+        borderStyle="double"
+        borderColor="cyan"
+        paddingX={2}
+        paddingY={1}
+        backgroundColor="black"
+      >
+        <Text bold color="cyan">
+          {label}
+        </Text>
+        <Box marginTop={1}>
+          <Text>&gt; </Text>
+          <InkTextInput
+            value={value}
+            onChange={onChange}
+            onSubmit={onSubmit}
+            placeholder={placeholder}
+          />
+        </Box>
+        <Box marginTop={1}>
+          <Text dimColor>⏎ Submit Esc Cancel</Text>
+        </Box>
       </Box>
     </Box>
   );

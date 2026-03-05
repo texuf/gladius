@@ -7,7 +7,11 @@ interface ConfirmModalProps {
   onCancel: () => void;
 }
 
-export function ConfirmModal({ message, onConfirm, onCancel }: ConfirmModalProps) {
+export function ConfirmModal({
+  message,
+  onConfirm,
+  onCancel,
+}: ConfirmModalProps) {
   useInput((input, key) => {
     if (input === "y" || input === "Y") {
       onConfirm();
@@ -18,17 +22,25 @@ export function ConfirmModal({ message, onConfirm, onCancel }: ConfirmModalProps
 
   return (
     <Box
-      flexDirection="column"
-      borderStyle="double"
-      borderColor="yellow"
-      paddingX={2}
-      paddingY={1}
-      alignSelf="center"
+      position="absolute"
+      width="100%"
+      height="100%"
+      justifyContent="center"
+      alignItems="center"
     >
-      <Text>{message}</Text>
-      <Box marginTop={1}>
-        <Text dimColor>y Confirm  </Text>
-        <Text bold>⏎/n Cancel</Text>
+      <Box
+        flexDirection="column"
+        borderStyle="double"
+        borderColor="yellow"
+        paddingX={2}
+        paddingY={1}
+        backgroundColor="black"
+      >
+        <Text>{message}</Text>
+        <Box marginTop={1}>
+          <Text dimColor>y Confirm </Text>
+          <Text bold>⏎/n Cancel</Text>
+        </Box>
       </Box>
     </Box>
   );
