@@ -44,10 +44,7 @@ export async function createWorktree(
   if (branchExists) {
     await $`git -C ${projectPath} worktree add ${worktreePath} ${branchName}`;
   } else {
-    // Create new task branch without upstream tracking. Tracking should only be
-    // configured once we explicitly push a remote branch.
-    await $`git -C ${projectPath} branch --no-track ${branchName} origin/${mainBranch}`;
-    await $`git -C ${projectPath} worktree add ${worktreePath} ${branchName}`;
+    await $`git -C ${projectPath} worktree add ${worktreePath} -b ${branchName} origin/${mainBranch}`;
   }
 
   // Copy .env files that are gitignored (secrets only, not tracked .env.example etc.)
