@@ -148,7 +148,7 @@ export function HotkeyHints() {
   } else if (view === "prComments") {
     hints.push("↑↓ Navigate", "Space Select/Deselect");
     if (prCommentsHasSelection) {
-      hints.push("⏎ Send Selected");
+      hints.push("⏎ Send+Commit", "p Send");
     }
     if (prCommentsSelectionKind === "thread") {
       hints.push("s Resolve");

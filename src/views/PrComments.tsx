@@ -246,6 +246,35 @@ export function PrComments() {
     }, 0);
   };
 
+  const buildSelectedIssuesPrompt = (finalInstruction: string): string => {
+    const parts: string[] = [];
+    const selectedItems = issueItems.filter((item) =>
+      selectedIssueKeys.has(item.key),
+    );
+    const selectedCiFailures = selectedItems.filter(
+      (item): item is Extract<IssueItem, { kind: "ci" }> => item.kind === "ci",
+    );
+    const selectedThreads = selectedItems.filter(
+      (item): item is Extract<IssueItem, { kind: "thread" }> =>
+        item.kind === "thread",
+    );
+
+    if (selectedCiFailures.length > 0) {
+      parts.push("Please fix these CI failures:\n");
+      for (const item of selectedCiFailures) {
+        parts.push(formatCiFailureForPaste(item.value));
+      }
+    }
+    if (selectedThreads.length > 0) {
+      parts.push("Please fix these PR review comments:\n");
+      for (const item of selectedThreads) {
+        parts.push(formatThreadForPaste(item.value));
+      }
+    }
+    parts.push(`\n${finalInstruction}`);
+    return parts.join("\n---\n\n");
+  };
+
   useInput((input, key) => {
     if (useStore.getState().modal?.type === "hotkeyMenu") return;
     if (key.escape) {
@@ -278,33 +307,16 @@ export function PrComments() {
     }
 
     if (key.return && activeTask && selectedIssueKeys.size > 0) {
-      const parts: string[] = [];
-      const selectedItems = issueItems.filter((item) =>
-        selectedIssueKeys.has(item.key),
+      const prompt = buildSelectedIssuesPrompt(
+        "Please commit and push the changes when done.",
       );
-      const selectedCiFailures = selectedItems.filter(
-        (item): item is Extract<IssueItem, { kind: "ci" }> =>
-          item.kind === "ci",
-      );
-      const selectedThreads = selectedItems.filter(
-        (item): item is Extract<IssueItem, { kind: "thread" }> =>
-          item.kind === "thread",
-      );
+      returnToConsoleWithPrompt(prompt);
+      return;
+    }
 
-      if (selectedCiFailures.length > 0) {
-        parts.push("Please fix these CI failures:\n");
-        for (const item of selectedCiFailures) {
-          parts.push(formatCiFailureForPaste(item.value));
-        }
-      }
-      if (selectedThreads.length > 0) {
-        parts.push("Please fix these PR review comments:\n");
-        for (const item of selectedThreads) {
-          parts.push(formatThreadForPaste(item.value));
-        }
-      }
-      parts.push("\nPlease commit and push the changes when done.");
-      returnToConsoleWithPrompt(parts.join("\n---\n\n"));
+    if (input === "p" && activeTask && selectedIssueKeys.size > 0) {
+      const prompt = buildSelectedIssuesPrompt("kindly address these issues");
+      returnToConsoleWithPrompt(prompt);
       return;
     }
 
