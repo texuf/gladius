@@ -50,11 +50,16 @@ function inferLlmWorkingFromPane(content: string): boolean {
   const recent = recentLines.join(" ").toLowerCase();
 
   if (!recent) return false;
+  if (recentLines.some((line) => line.startsWith("❯"))) return false;
+
   return (
     recent.includes("esc to interrupt") ||
     recentLines.some((line) => {
       const normalized = line.toLowerCase();
-      return normalized.startsWith("✻ ") && !normalized.startsWith("✻ cooked for");
+      return (
+        normalized.startsWith("✻ ") &&
+        (normalized.includes("…") || normalized.includes("..."))
+      );
     }) ||
     recent.includes("running…") ||
     recent.includes("running...") ||
