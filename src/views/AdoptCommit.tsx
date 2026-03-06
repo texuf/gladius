@@ -1,10 +1,13 @@
 import React, { useState, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
 import InkTextInput from "ink-text-input";
-import { $ } from "bun";
 import { useStore } from "../store/index.js";
 import { getTasksForRepo, createTask as dbCreateTask } from "../services/db.js";
 import { createWorktree, deleteWorktree } from "../services/worktree.js";
+import {
+  resolveProjectBackend,
+  runBackendCommand,
+} from "../services/projectBackend.js";
 import { deduplicateLabel, generateLabel } from "../utils/label.js";
 import { BRANCH_PREFIX } from "../utils/constants.js";
 
@@ -36,9 +39,27 @@ export function AdoptCommit() {
     setPhase("creating");
     let worktreePath: string | null = null;
     let branchName: string | null = null;
+    const backend = resolveProjectBackend({
+      backend_kind: activeRepo.project_backend_kind,
+      backend_target: activeRepo.project_backend_target,
+      backend_base_path: activeRepo.project_backend_base_path,
+      backend_display_name: activeRepo.project_backend_display_name,
+      path: activeRepo.project_path,
+      name: activeRepo.project_name,
+    });
     try {
-      const subject =
-        await $`git -C ${activeRepo.path} show -s --format=%s ${trimmedHash}`.text();
+      const subjectResult = runBackendCommand(
+        backend,
+        `git show -s --format=%s ${trimmedHash}`,
+        { cwd: activeRepo.path },
+      );
+      if (subjectResult.exitCode !== 0) {
+        throw new Error(
+          (subjectResult.stderr || subjectResult.stdout).trim() ||
+            "Failed to read commit subject.",
+        );
+      }
+      const subject = subjectResult.stdout;
       const description = subject.trim();
       if (!description) {
         throw new Error("Commit has no subject line.");
@@ -52,8 +73,18 @@ export function AdoptCommit() {
       label = deduplicateLabel(label, existingLabels);
       branchName = `${BRANCH_PREFIX}/${label}`;
 
-      worktreePath = await createWorktree(activeRepo.path, label);
-      await $`git -C ${worktreePath} cherry-pick ${trimmedHash}`.text();
+      worktreePath = await createWorktree(activeRepo, label);
+      const cherryPickResult = runBackendCommand(
+        backend,
+        `git cherry-pick ${trimmedHash}`,
+        { cwd: worktreePath },
+      );
+      if (cherryPickResult.exitCode !== 0) {
+        throw new Error(
+          (cherryPickResult.stderr || cherryPickResult.stdout).trim() ||
+            "Failed to cherry-pick commit.",
+        );
+      }
 
       const task = dbCreateTask(
         activeRepo.id,
@@ -69,14 +100,15 @@ export function AdoptCommit() {
     } catch (e: any) {
       if (worktreePath && branchName) {
         try {
-          await $`git -C ${worktreePath} cherry-pick --abort`.quiet().nothrow();
+          runBackendCommand(backend, "git cherry-pick --abort >/dev/null 2>&1 || true", {
+            cwd: worktreePath,
+          });
         } catch {}
         try {
-          await deleteWorktree(activeRepo.path, worktreePath, branchName);
+          await deleteWorktree(activeRepo, worktreePath, branchName);
         } catch {}
       }
-      const stderr = e?.stderr?.toString?.()?.trim?.();
-      setError(stderr || e?.message || "Failed to create task from commit");
+      setError(e?.message || "Failed to create task from commit");
       setPhase("error");
     }
   };

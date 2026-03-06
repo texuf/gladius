@@ -18,7 +18,11 @@ import {
   setProjectLinearEnabled,
   touchProject,
 } from "../services/db.js";
-import { resolveProjectBackend } from "../services/projectBackend.js";
+import {
+  checkBackendDependencies,
+  resolveProjectBackend,
+  type DependencyCheckResult,
+} from "../services/projectBackend.js";
 import { destroySession } from "../services/terminalManager.js";
 import { processChord } from "../utils/keyboard.js";
 
@@ -28,6 +32,8 @@ export function ProjectView() {
   const setRepos = useStore((s) => s.setRepos);
   const setView = useStore((s) => s.setView);
   const setActiveProject = useStore((s) => s.setActiveProject);
+  const backendReachability = useStore((s) => s.backendReachability);
+  const setBackendReachability = useStore((s) => s.setBackendReachability);
   const focusPane = useStore((s) => s.focusPane);
   const setFocusPane = useStore((s) => s.setFocusPane);
   const chordBuffer = useStore((s) => s.chordBuffer);
@@ -36,6 +42,10 @@ export function ProjectView() {
   const [model, setModel] = useState<"claude" | "codex" | null>(null);
   const [linearEnabled, setLinearEnabled] = useState(false);
   const [refreshStatus, setRefreshStatus] = useState("");
+  const [dependencyStatus, setDependencyStatus] = useState("");
+  const [dependencyResult, setDependencyResult] =
+    useState<DependencyCheckResult | null>(null);
+  const [checkingDependencies, setCheckingDependencies] = useState(false);
   const [error, setError] = useState("");
   const prevFocusPaneRef = useRef(focusPane);
 
@@ -52,6 +62,10 @@ export function ProjectView() {
     const saved = getAppState(`project.model.${activeProject.id}`);
     setModel(saved === "claude" || saved === "codex" ? saved : null);
     setLinearEnabled(isProjectLinearEnabled(activeProject.id));
+    setRefreshStatus("");
+    setDependencyStatus("");
+    setDependencyResult(null);
+    setError("");
   }, [activeProject?.id]);
 
   const selectModel = (nextModel: "claude" | "codex") => {
@@ -68,10 +82,6 @@ export function ProjectView() {
   const runRefresh = useCallback(() => {
     const projectId = activeProject?.id;
     if (!projectId) return;
-    if (activeProject.backend_kind === "ssh") {
-      setError("SSH project refresh is not wired yet.");
-      return;
-    }
     try {
       const result = refreshProjectRepos(projectId);
       const updatedRepos = getAllRepos();
@@ -80,14 +90,24 @@ export function ProjectView() {
       if (updatedProject) {
         setActiveProject(updatedProject);
       }
+      setBackendReachability(projectId, "online");
       setError("");
       setRefreshStatus(
         `found ${result.discovered}, +${result.added} new, ${result.reassigned} reassigned`,
       );
     } catch (e: any) {
+      if (activeProject?.backend_kind === "ssh") {
+        setBackendReachability(projectId, "offline");
+      }
       setError(e.message || "Refresh failed");
     }
-  }, [activeProject?.backend_kind, activeProject?.id, setActiveProject, setRepos]);
+  }, [
+    activeProject?.backend_kind,
+    activeProject?.id,
+    setActiveProject,
+    setBackendReachability,
+    setRepos,
+  ]);
 
   const toggleLinear = () => {
     if (!activeProject) return;
@@ -95,6 +115,39 @@ export function ProjectView() {
     setProjectLinearEnabled(activeProject.id, next);
     setLinearEnabled(next);
   };
+
+  const runDependencyCheck = useCallback(() => {
+    if (!backend || checkingDependencies) return;
+    setCheckingDependencies(true);
+    setDependencyStatus(`Checking ${backend.kind} dependencies...`);
+    setError("");
+    try {
+      const result = checkBackendDependencies(backend);
+      if (activeProject) {
+        setBackendReachability(
+          activeProject.id,
+          result.items.some(
+            (item) => item.tool === "ssh" && item.status === "warning",
+          )
+            ? "offline"
+            : "online",
+        );
+      }
+      setDependencyResult(result);
+      const problemCount = result.items.filter(
+        (item) => item.status !== "ok",
+      ).length;
+      setDependencyStatus(
+        problemCount === 0
+          ? "All checked dependencies are available."
+          : `${problemCount} dependency issue${problemCount === 1 ? "" : "s"} found.`,
+      );
+    } catch (e: any) {
+      setError(e.message || "Dependency check failed");
+    } finally {
+      setCheckingDependencies(false);
+    }
+  }, [activeProject, backend, checkingDependencies, setBackendReachability]);
 
   useEffect(() => {
     if (prevFocusPaneRef.current === "terminal" && focusPane === "none") {
@@ -149,6 +202,11 @@ export function ProjectView() {
       return;
     }
 
+    if (input === "d" && !key.super) {
+      runDependencyCheck();
+      return;
+    }
+
     if (input === "y" && !key.super) {
       toggleLinear();
       return;
@@ -189,6 +247,7 @@ export function ProjectView() {
         <Text dimColor>
           {projectRepos.length} repo{projectRepos.length === 1 ? "" : "s"}
           {refreshStatus ? ` | ${refreshStatus}` : ""}
+          {dependencyStatus ? ` | ${dependencyStatus}` : ""}
           {model ? ` | model: ${model}` : " | cl: Claude co: Codex"}
           {` | linear: ${linearEnabled ? "on" : "off"} (y toggle)`}
         </Text>
@@ -196,47 +255,66 @@ export function ProjectView() {
           backend: {backend.kind}
           {backend.target ? ` | target: ${backend.target}` : ""}
           {backend.kind === "ssh" ? ` | base: ${backend.basePath}` : ""}
+          {backendReachability[activeProject.id]
+            ? ` | ${backendReachability[activeProject.id]}`
+            : ""}
         </Text>
+        {checkingDependencies && (
+          <Text dimColor>Running dependency checks...</Text>
+        )}
         {error && <Text color="red">{error}</Text>}
       </Box>
 
-      {backend.kind === "local" ? (
-        <>
-          <TerminalPane
-            type="terminal"
-            label="Terminal"
-            focusKey="t"
-            layout="project"
-            workspaceId={workspaceId}
-            cwd={activeProject.path}
-            captureSessionIds={false}
-          />
-
-          <TerminalPane
-            type="console"
-            label="Console"
-            focusKey="c"
-            layout="project"
-            workspaceId={workspaceId}
-            cwd={activeProject.path}
-            model={model}
-            captureSessionIds={false}
-          />
-        </>
-      ) : (
+      {dependencyResult && (
         <Box
           flexDirection="column"
           borderStyle="single"
           borderColor="gray"
           paddingX={1}
+          marginBottom={1}
         >
-          <Text bold>Remote Project</Text>
-          <Text dimColor>
-            SSH-backed project terminals and consoles are not wired yet in this
-            phase.
+          <Text bold>
+            Dependency Check
+            <Text dimColor>{` (${dependencyResult.backend.displayName})`}</Text>
           </Text>
+          {dependencyResult.items.map((item) => (
+            <Text
+              key={`${item.tool}-${item.requiredFor}`}
+              color={
+                item.status === "ok"
+                  ? "green"
+                  : item.status === "warning"
+                    ? "yellow"
+                    : "red"
+              }
+            >
+              {item.tool.padEnd(6)} {item.status.toUpperCase()} [{item.requiredFor}]{" "}
+              <Text color="gray">{item.detail}</Text>
+            </Text>
+          ))}
         </Box>
       )}
+
+      <TerminalPane
+        type="terminal"
+        label="Terminal"
+        focusKey="t"
+        layout="project"
+        workspaceId={workspaceId}
+        cwd={backend.basePath}
+        captureSessionIds={false}
+      />
+
+      <TerminalPane
+        type="console"
+        label="Console"
+        focusKey="c"
+        layout="project"
+        workspaceId={workspaceId}
+        cwd={backend.basePath}
+        model={model}
+        captureSessionIds={false}
+      />
     </Box>
   );
 }

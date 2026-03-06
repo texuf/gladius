@@ -28,6 +28,7 @@ export const useStore = create<AppState>((set) => ({
   tasks: [],
   gitStatuses: {},
   taskStatuses: {},
+  backendReachability: {},
   consoleInteractedTasks: new Set<string>(),
   clearedPrTasks: new Set<string>(),
 
@@ -65,6 +66,13 @@ export const useStore = create<AppState>((set) => ({
       gitStatuses: { ...state.gitStatuses, [taskId]: status },
     })),
   setTaskStatuses: (taskStatuses) => set({ taskStatuses }),
+  setBackendReachability: (projectId, status) =>
+    set((state) => ({
+      backendReachability: {
+        ...state.backendReachability,
+        [projectId]: status,
+      },
+    })),
   markConsoleInteracted: (taskId) =>
     set((state) => {
       const next = new Set(state.consoleInteractedTasks);

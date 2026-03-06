@@ -321,7 +321,7 @@ export function TaskList() {
     (async () => {
       if (task.worktree_path && activeRepo) {
         await deleteWorktree(
-          activeRepo.path,
+          activeRepo,
           task.worktree_path,
           task.branch_name,
         );
@@ -338,7 +338,7 @@ export function TaskList() {
       const existingLabels = tasks.map((t) => t.label);
       const reopenedLabel = buildReopenLabel(task.label, existingLabels);
       const reopenedBranch = `${BRANCH_PREFIX}/${reopenedLabel}`;
-      const worktreePath = await createWorktree(activeRepo.path, reopenedLabel);
+      const worktreePath = await createWorktree(activeRepo, reopenedLabel);
       dbReopenTask(task.id, worktreePath);
       dbUpdateTask(task.id, {
         label: reopenedLabel,
@@ -375,7 +375,7 @@ export function TaskList() {
       label = deduplicateLabel(label, existingLabels);
       const branchName = `${BRANCH_PREFIX}/${label}`;
 
-      const worktreePath = await createWorktree(activeRepo.path, label);
+      const worktreePath = await createWorktree(activeRepo, label);
       const task = dbCreateTask(
         activeRepo.id,
         label,
@@ -506,6 +506,7 @@ export function TaskList() {
                   orange={taskColor === "orange" ? 1 : 0}
                   yellow={taskColor === "yellow" ? 1 : 0}
                   purple={taskColor === "purple" ? 1 : 0}
+                  gray={taskColor === "gray" ? 1 : 0}
                 />
               ) : (
                 <Text> </Text>

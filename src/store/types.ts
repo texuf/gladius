@@ -89,7 +89,10 @@ export type TaskStatusColor =
   | "orange"
   | "yellow"
   | "purple"
+  | "gray"
   | "none";
+
+export type BackendReachability = "online" | "offline";
 
 export interface GitStatus {
   branch: string;
@@ -189,6 +192,7 @@ export interface AppState {
   tasks: Task[];
   gitStatuses: Record<string, GitStatus>;
   taskStatuses: Record<string, TaskStatusColor>;
+  backendReachability: Record<string, BackendReachability>;
   consoleInteractedTasks: Set<string>;
   clearedPrTasks: Set<string>;
 
@@ -209,6 +213,10 @@ export interface AppState {
   setTasks: (tasks: Task[]) => void;
   setGitStatus: (taskId: string, status: GitStatus) => void;
   setTaskStatuses: (statuses: Record<string, TaskStatusColor>) => void;
+  setBackendReachability: (
+    projectId: string,
+    status: BackendReachability,
+  ) => void;
   markConsoleInteracted: (taskId: string) => void;
   clearConsoleInteracted: (taskId: string) => void;
   markPrCleared: (taskId: string) => void;

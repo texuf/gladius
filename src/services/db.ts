@@ -10,6 +10,10 @@ import type {
   Task,
   TaskEvent,
 } from "../store/types.js";
+import {
+  discoverRemoteGitRepos,
+  resolveProjectBackend,
+} from "./projectBackend.js";
 
 const GLADIUS_DIR = join(homedir(), ".gladius");
 const DB_PATH = join(GLADIUS_DIR, "gladius.db");
@@ -791,17 +795,19 @@ export function refreshProjectRepos(projectId: string): {
   if (!project) {
     throw new Error("Project not found");
   }
-  if (project.backend_kind === "ssh") {
-    throw new Error("SSH project refresh is not wired yet");
-  }
-
+  const backend = resolveProjectBackend(project);
   const discoveryRoot = project.backend_base_path || project.path;
-  if (!existsSync(discoveryRoot)) {
-    throw new Error(`Project path does not exist: ${discoveryRoot}`);
-  }
 
   const now = new Date().toISOString();
-  const discoveredPaths = discoverGitRepos(discoveryRoot);
+  const discoveredPaths =
+    project.backend_kind === "ssh"
+      ? discoverRemoteGitRepos(backend)
+      : (() => {
+          if (!existsSync(discoveryRoot)) {
+            throw new Error(`Project path does not exist: ${discoveryRoot}`);
+          }
+          return discoverGitRepos(discoveryRoot);
+        })();
   const getRepoByPath = db.query(
     "SELECT id, project_id FROM repos WHERE path = ?",
   );

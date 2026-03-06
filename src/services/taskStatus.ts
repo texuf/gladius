@@ -1,13 +1,16 @@
 import { $ } from "bun";
-import { getAllActiveTasks, updateTask } from "./db.js";
+import { getAllActiveTasks, getAllRepos, getRepoById, updateTask } from "./db.js";
 import { getGitStatusWithPr } from "./git.js";
+import { isBackendReachable, resolveProjectBackend } from "./projectBackend.js";
 import { getRecentTaskConversation } from "./taskPrompt.js";
 import { useStore } from "../store/index.js";
 import type {
+  BackendReachability,
   GitStatus,
   GitWorkStatus,
   LlmActivityStatus,
   PrReadiness,
+  Repo,
   Task,
   TaskStatusColor,
 } from "../store/types.js";
@@ -147,6 +150,33 @@ async function getLlmActivityStatus(
   return paneStatus;
 }
 
+function getRepoMap(): Map<string, Repo> {
+  return new Map(getAllRepos().map((repo) => [repo.id, repo]));
+}
+
+function getReachabilityForRepos(
+  repos: Iterable<Repo>,
+): Record<string, BackendReachability> {
+  const reachability: Record<string, BackendReachability> = {};
+
+  for (const repo of repos) {
+    if (reachability[repo.project_id]) continue;
+    const backend = resolveProjectBackend({
+      backend_kind: repo.project_backend_kind,
+      backend_target: repo.project_backend_target,
+      backend_base_path: repo.project_backend_base_path,
+      backend_display_name: repo.project_backend_display_name,
+      path: repo.project_path,
+      name: repo.project_name,
+    });
+    reachability[repo.project_id] = isBackendReachable(backend)
+      ? "online"
+      : "offline";
+  }
+
+  return reachability;
+}
+
 function resolveCombinedTaskColor(params: {
   prReadiness: PrReadiness;
   gitStatus: GitWorkStatus;
@@ -221,6 +251,8 @@ export async function refreshAllTaskStatuses(options?: {
   forcePrRefresh?: boolean;
 }): Promise<Record<string, TaskStatusColor>> {
   const tasks = getAllActiveTasks();
+  const repoMap = getRepoMap();
+  const reachabilityByProject = getReachabilityForRepos(repoMap.values());
   const state = useStore.getState();
   const interacted = state.consoleInteractedTasks;
   const focusedTaskId =
@@ -230,6 +262,16 @@ export async function refreshAllTaskStatuses(options?: {
 
   await Promise.all(
     tasks.map(async (task) => {
+      const repo = repoMap.get(task.repo_id);
+      if (
+        repo &&
+        reachabilityByProject[repo.project_id] === "offline" &&
+        repo.project_backend_kind === "ssh"
+      ) {
+        taskStatuses[task.id] = "gray";
+        return;
+      }
+
       const llmStatus = await getLlmActivityStatus(task);
       let gitStatus: GitStatus | null = null;
 
@@ -262,6 +304,10 @@ export async function refreshAllTaskStatuses(options?: {
   );
 
   useStore.setState((prev) => ({
+    backendReachability: {
+      ...prev.backendReachability,
+      ...reachabilityByProject,
+    },
     gitStatuses: { ...prev.gitStatuses, ...gitStatuses },
     taskStatuses,
   }));
@@ -278,6 +324,29 @@ export async function refreshTaskStatus(
   gitStatusOverride?: GitStatus | null,
 ): Promise<TaskStatusColor> {
   const state = useStore.getState();
+  const repo = getRepoById(task.repo_id);
+  if (repo && repo.project_backend_kind === "ssh") {
+    const backend = resolveProjectBackend({
+      backend_kind: repo.project_backend_kind,
+      backend_target: repo.project_backend_target,
+      backend_base_path: repo.project_backend_base_path,
+      backend_display_name: repo.project_backend_display_name,
+      path: repo.project_path,
+      name: repo.project_name,
+    });
+    const reachable = isBackendReachable(backend);
+    useStore.getState().setBackendReachability(
+      repo.project_id,
+      reachable ? "online" : "offline",
+    );
+    if (!reachable) {
+      useStore.setState((prev) => ({
+        taskStatuses: { ...prev.taskStatuses, [task.id]: "gray" },
+      }));
+      return "gray";
+    }
+  }
+
   const llmStatus = await getLlmActivityStatus(task);
   const gitStatus = gitStatusOverride ?? state.gitStatuses[task.id] ?? null;
   const isConsoleFocused =

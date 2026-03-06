@@ -139,6 +139,7 @@ export function TaskView() {
   const prInFlightRef = useRef(false);
 
   const pollGit = () => {
+    if (activeRepo?.project_backend_kind === "ssh") return Promise.resolve();
     if (!activeTask?.worktree_path) return Promise.resolve();
     return getGitStatus(activeTask.worktree_path).then((status) => {
       const mergedStatus = {
@@ -156,6 +157,7 @@ export function TaskView() {
     });
   };
   const pollPr = (forceRefresh = false) => {
+    if (activeRepo?.project_backend_kind === "ssh") return Promise.resolve();
     if (!activeTask?.worktree_path) return Promise.resolve();
     if (prInFlightRef.current && !forceRefresh) return Promise.resolve();
     prInFlightRef.current = true;
@@ -192,7 +194,7 @@ export function TaskView() {
       if (gitIntervalRef.current) clearInterval(gitIntervalRef.current);
       if (prIntervalRef.current) clearInterval(prIntervalRef.current);
     };
-  }, [activeTask?.id]);
+  }, [activeRepo?.project_backend_kind, activeTask?.id]);
 
   // When opening a task, jump directly to console if an LLM session already exists.
   useEffect(() => {
@@ -808,7 +810,7 @@ export function TaskView() {
       destroySession(`${activeTask.id}-console`);
       if (activeTask.worktree_path) {
         await deleteWorktree(
-          activeRepo.path,
+          activeRepo,
           activeTask.worktree_path,
           activeTask.branch_name,
         );
@@ -830,13 +832,21 @@ export function TaskView() {
     !gitStatus.tracksMain;
 
   // Aggregate status dots for ALL tasks (including active)
-  const allDots = { green: 0, red: 0, orange: 0, yellow: 0, purple: 0 };
+  const allDots = {
+    green: 0,
+    red: 0,
+    orange: 0,
+    yellow: 0,
+    purple: 0,
+    gray: 0,
+  };
   for (const [, color] of Object.entries(taskStatuses)) {
     if (color === "green") allDots.green++;
     else if (color === "red") allDots.red++;
     else if (color === "orange") allDots.orange++;
     else if (color === "yellow") allDots.yellow++;
     else if (color === "purple") allDots.purple++;
+    else if (color === "gray") allDots.gray++;
   }
 
   return (

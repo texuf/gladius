@@ -42,7 +42,7 @@ export function AdoptBranch() {
       label = deduplicateLabel(label, existingLabels);
 
       const description = `Adopted branch: ${trimmed}`;
-      const worktreePath = await adoptBranch(activeRepo.path, trimmed, label);
+      const worktreePath = await adoptBranch(activeRepo, trimmed, label);
       const task = dbCreateTask(
         activeRepo.id,
         label,

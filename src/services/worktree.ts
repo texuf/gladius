@@ -1,194 +1,177 @@
-import { $ } from "bun";
-import { join, basename } from "path";
+import { basename, dirname, join, posix as posixPath } from "path";
 import { homedir } from "os";
-import { existsSync, mkdirSync, copyFileSync, readdirSync, statSync } from "fs";
+import { existsSync, mkdirSync } from "fs";
+import type { Repo } from "../store/types.js";
+import {
+  quoteShell,
+  resolveProjectBackend,
+  runBackendCommand,
+} from "./projectBackend.js";
 import { BRANCH_PREFIX } from "../utils/constants.js";
 
-/**
- * Create a git worktree for a task.
- * @param projectPath - Absolute path to the project root
- * @param label - Task label (used for branch and worktree dir name)
- * @returns The absolute path to the worktree directory
- */
+type RepoBackendContext = Pick<
+  Repo,
+  | "path"
+  | "name"
+  | "project_backend_kind"
+  | "project_backend_target"
+  | "project_backend_base_path"
+  | "project_backend_display_name"
+  | "project_path"
+  | "project_name"
+>;
+
+function resolveRepoBackend(repo: RepoBackendContext) {
+  return resolveProjectBackend({
+    backend_kind: repo.project_backend_kind,
+    backend_target: repo.project_backend_target,
+    backend_base_path: repo.project_backend_base_path,
+    backend_display_name: repo.project_backend_display_name,
+    path: repo.project_path,
+    name: repo.project_name,
+  });
+}
+
+function getLocalWorktreePath(repoPath: string, label: string): string {
+  return join(homedir(), ".wt", basename(repoPath), label);
+}
+
+function getRemoteWorktreePathScript(repoPath: string, label: string): string {
+  const repoName = posixPath.basename(repoPath);
+  return [
+    `worktree_dir="$HOME/.wt/${repoName}"`,
+    `mkdir -p "$worktree_dir"`,
+    `worktree_path="$worktree_dir/${label}"`,
+    `printf '%s\\n' "$worktree_path"`,
+  ].join("; ");
+}
+
+function requireSuccess(stderr: string, stdout: string, exitCode: number, fallback: string): void {
+  if (exitCode === 0) return;
+  const detail = (stderr || stdout).trim();
+  throw new Error(detail || fallback);
+}
+
+function copyIgnoredEnvFiles(repo: RepoBackendContext, worktreePath: string): void {
+  const backend = resolveRepoBackend(repo);
+  const command = [
+    "find . \\(",
+    "-path './node_modules' -o",
+    "-path './.git' -o",
+    "-path './.gladius' -o",
+    "-path './dist' -o",
+    "-path './build'",
+    "\\) -prune -o -type f -name '.env*' -print |",
+    "while IFS= read -r rel; do",
+    '  rel="${rel#./}"',
+    '  [ -n "$rel" ] || continue',
+    `  if git check-ignore "$rel" >/dev/null 2>&1; then`,
+    `    mkdir -p ${quoteShell(worktreePath)}/"$(dirname "$rel")"`,
+    `    cp "$rel" ${quoteShell(worktreePath)}/"$rel" 2>/dev/null || true`,
+    "  fi",
+    "done",
+  ].join(" ");
+  runBackendCommand(backend, command, { cwd: repo.path });
+}
+
+function createOrAttachWorktree(
+  repo: RepoBackendContext,
+  label: string,
+  branchName: string,
+  mode: "new" | "adopt",
+): string {
+  const backend = resolveRepoBackend(repo);
+  const worktreePath =
+    backend.kind === "ssh"
+      ? (() => {
+          const result = runBackendCommand(
+            backend,
+            getRemoteWorktreePathScript(repo.path, label),
+            { cwd: repo.path },
+          );
+          requireSuccess(
+            result.stderr,
+            result.stdout,
+            result.exitCode,
+            "Failed to prepare remote worktree directory.",
+          );
+          return result.stdout.trim().split(/\r?\n/).filter(Boolean).pop() || "";
+        })()
+      : getLocalWorktreePath(repo.path, label);
+
+  if (!worktreePath) {
+    throw new Error("Failed to resolve worktree path.");
+  }
+  if (backend.kind === "local") {
+    const worktreeDir = dirname(worktreePath);
+    if (!existsSync(worktreeDir)) {
+      mkdirSync(worktreeDir, { recursive: true });
+    }
+  }
+
+  const command =
+    mode === "new"
+      ? [
+          "git fetch origin >/dev/null 2>&1 || true",
+          "main_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's#refs/remotes/origin/##')",
+          '[ -n "$main_branch" ] || main_branch=main',
+          `if git rev-parse --verify ${quoteShell(branchName)} >/dev/null 2>&1; then`,
+          `  git worktree add ${quoteShell(worktreePath)} ${quoteShell(branchName)}`,
+          "else",
+          `  git worktree add ${quoteShell(worktreePath)} -b ${quoteShell(branchName)} origin/"$main_branch"`,
+          "fi",
+        ].join("; ")
+      : [
+          "git fetch origin >/dev/null 2>&1 || true",
+          `if git rev-parse --verify ${quoteShell(branchName)} >/dev/null 2>&1; then`,
+          `  git worktree add ${quoteShell(worktreePath)} ${quoteShell(branchName)}`,
+          "else",
+          `  git worktree add ${quoteShell(worktreePath)} -b ${quoteShell(branchName)} ${quoteShell(`origin/${branchName}`)}`,
+          "fi",
+        ].join("; ");
+
+  const result = runBackendCommand(backend, command, { cwd: repo.path });
+  requireSuccess(
+    result.stderr,
+    result.stdout,
+    result.exitCode,
+    "Failed to create git worktree.",
+  );
+
+  copyIgnoredEnvFiles(repo, worktreePath);
+  return worktreePath;
+}
+
 export async function createWorktree(
-  projectPath: string,
+  repo: RepoBackendContext,
   label: string,
 ): Promise<string> {
   const branchName = `${BRANCH_PREFIX}/${label}`;
-  const projectName = basename(projectPath);
-  const worktreeDir = join(homedir(), ".wt", projectName);
-  const worktreePath = join(worktreeDir, label);
-
-  // Ensure worktree directory exists
-  if (!existsSync(worktreeDir)) {
-    mkdirSync(worktreeDir, { recursive: true });
-  }
-
-  // Fetch latest and resolve main branch
-  await $`git -C ${projectPath} fetch origin`.quiet().nothrow();
-  const mainBranch =
-    await $`git -C ${projectPath} symbolic-ref refs/remotes/origin/HEAD`
-      .quiet()
-      .text()
-      .then((ref) => ref.trim().replace("refs/remotes/origin/", ""))
-      .catch(() => "main");
-
-  // Create worktree — reuse existing branch or create new from origin/main
-  const branchExists =
-    await $`git -C ${projectPath} rev-parse --verify ${branchName}`
-      .quiet()
-      .then(
-        () => true,
-        () => false,
-      );
-  if (branchExists) {
-    await $`git -C ${projectPath} worktree add ${worktreePath} ${branchName}`;
-  } else {
-    await $`git -C ${projectPath} worktree add ${worktreePath} -b ${branchName} origin/${mainBranch}`;
-  }
-
-  // Copy .env files that are gitignored (secrets only, not tracked .env.example etc.)
-  await copyIgnoredEnvFiles(projectPath, worktreePath);
-
-  return worktreePath;
+  return createOrAttachWorktree(repo, label, branchName, "new");
 }
 
-/**
- * Adopt an existing remote branch into a new worktree.
- * Unlike createWorktree, this checks out the remote branch directly
- * instead of creating a new branch from origin/main.
- */
 export async function adoptBranch(
-  projectPath: string,
+  repo: RepoBackendContext,
   remoteBranch: string,
   label: string,
 ): Promise<string> {
-  const projectName = basename(projectPath);
-  const worktreeDir = join(homedir(), ".wt", projectName);
-  const worktreePath = join(worktreeDir, label);
-
-  if (!existsSync(worktreeDir)) {
-    mkdirSync(worktreeDir, { recursive: true });
-  }
-
-  await $`git -C ${projectPath} fetch origin`.quiet().nothrow();
-
-  const localExists =
-    await $`git -C ${projectPath} rev-parse --verify ${remoteBranch}`
-      .quiet()
-      .then(
-        () => true,
-        () => false,
-      );
-
-  if (localExists) {
-    await $`git -C ${projectPath} worktree add ${worktreePath} ${remoteBranch}`;
-  } else {
-    await $`git -C ${projectPath} worktree add ${worktreePath} -b ${remoteBranch} origin/${remoteBranch}`;
-  }
-
-  await copyIgnoredEnvFiles(projectPath, worktreePath);
-  return worktreePath;
+  return createOrAttachWorktree(repo, label, remoteBranch, "adopt");
 }
 
-/**
- * Delete a git worktree.
- */
 export async function deleteWorktree(
-  projectPath: string,
+  repo: RepoBackendContext,
   worktreePath: string,
   branchName?: string | null,
 ): Promise<void> {
-  try {
-    await $`git -C ${projectPath} worktree remove ${worktreePath} --force`;
-  } catch {
-    // Worktree may already be gone
-  }
-  try {
-    await $`git -C ${projectPath} worktree prune`;
-  } catch {
-    // Ignore prune errors
-  }
-  if (branchName) {
-    try {
-      await $`git -C ${projectPath} branch -D ${branchName}`;
-    } catch {
-      // Branch may already be gone
-    }
-  }
-}
-
-/**
- * Copy .env* files that are gitignored from source to destination,
- * maintaining relative paths. Tracked files (e.g. .env.example) are skipped.
- */
-async function copyIgnoredEnvFiles(src: string, dest: string) {
-  const files = findEnvFiles(src);
-  if (files.length === 0) return;
-
-  // Ask git which of these files are ignored
-  const relativePaths = files.map((f) => f.slice(src.length + 1));
-  try {
-    const result = await $`git -C ${src} check-ignore ${relativePaths}`
-      .quiet()
-      .nothrow()
-      .text();
-    const ignored = new Set(result.trim().split("\n").filter(Boolean));
-
-    for (const rel of relativePaths) {
-      if (!ignored.has(rel)) continue;
-      const srcPath = join(src, rel);
-      const destPath = join(dest, rel);
-      const destDir = destPath.slice(0, destPath.lastIndexOf("/"));
-      if (!existsSync(destDir)) {
-        mkdirSync(destDir, { recursive: true });
-      }
-      try {
-        copyFileSync(srcPath, destPath);
-      } catch {
-        // Skip files we can't copy
-      }
-    }
-  } catch {
-    // If git check-ignore fails, skip copying entirely
-  }
-}
-
-/**
- * Find all .env* files in a directory (non-recursive into node_modules, .git, worktrees).
- */
-function findEnvFiles(dir: string, depth = 0): string[] {
-  if (depth > 3) return []; // Don't go too deep
-
-  const results: string[] = [];
-  try {
-    const entries = readdirSync(dir);
-    for (const entry of entries) {
-      // Skip directories we don't want to traverse
-      if (
-        entry === "node_modules" ||
-        entry === ".git" ||
-        entry === ".gladius" ||
-        entry === "dist" ||
-        entry === "build"
-      ) {
-        continue;
-      }
-
-      const fullPath = join(dir, entry);
-      try {
-        const stat = statSync(fullPath);
-        if (stat.isFile() && entry.startsWith(".env")) {
-          results.push(fullPath);
-        } else if (stat.isDirectory()) {
-          results.push(...findEnvFiles(fullPath, depth + 1));
-        }
-      } catch {
-        // Skip inaccessible files
-      }
-    }
-  } catch {
-    // Skip inaccessible directories
-  }
-  return results;
+  const backend = resolveRepoBackend(repo);
+  const command = [
+    `git worktree remove ${quoteShell(worktreePath)} --force >/dev/null 2>&1 || true`,
+    "git worktree prune >/dev/null 2>&1 || true",
+    branchName
+      ? `git branch -D ${quoteShell(branchName)} >/dev/null 2>&1 || true`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("; ");
+  runBackendCommand(backend, command, { cwd: repo.path });
 }

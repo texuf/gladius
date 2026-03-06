@@ -73,6 +73,7 @@ export function HotkeyHints() {
         "co Codex",
         "l/o Switch",
         "r Refresh",
+        "d Dependencies",
         "y Linear",
         "Esc Back",
       );

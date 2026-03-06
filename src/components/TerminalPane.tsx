@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Box, Text } from "ink";
+import { homedir } from "os";
 import { useStore } from "../store/index.js";
 import { EmbeddedTerminal } from "./EmbeddedTerminal.js";
 import {
@@ -11,6 +12,11 @@ import {
 import { getSession, writeToSession } from "../services/terminalManager.js";
 import { getProjectLinearTeam, updateTask } from "../services/db.js";
 import { getLinearIssueContext } from "../services/linear.js";
+import {
+  openBackendLlmCommand,
+  openBackendShellCommand,
+  resolveProjectBackend,
+} from "../services/projectBackend.js";
 
 interface TerminalPaneProps {
   type: "terminal" | "console";
@@ -65,6 +71,7 @@ export function TerminalPane({
 }: TerminalPaneProps) {
   const focusPane = useStore((s) => s.focusPane);
   const setFocusPane = useStore((s) => s.setFocusPane);
+  const activeProject = useStore((s) => s.activeProject);
   const activeTask = useStore((s) => s.activeTask);
   const activeRepo = useStore((s) => s.activeRepo);
   const setActiveTask = useStore((s) => s.setActiveTask);
@@ -83,7 +90,23 @@ export function TerminalPane({
   const effectiveWorkspaceId = workspaceId ?? activeTask?.id ?? "";
   const effectiveCwd = cwd ?? activeTask?.worktree_path ?? null;
   const effectiveModel = model ?? activeTask?.model ?? null;
-  const shouldCaptureSessionIds = captureSessionIds ?? isTaskScoped;
+  const backend = isTaskScoped
+    ? activeRepo
+      ? resolveProjectBackend({
+          backend_kind: activeRepo.project_backend_kind,
+          backend_target: activeRepo.project_backend_target,
+          backend_base_path: activeRepo.project_backend_base_path,
+          backend_display_name: activeRepo.project_backend_display_name,
+          path: activeRepo.project_path,
+          name: activeRepo.project_name,
+        })
+      : null
+    : layout === "project" && activeProject
+      ? resolveProjectBackend(activeProject)
+      : null;
+  const isRemoteBackend = backend?.kind === "ssh";
+  const shouldCaptureSessionIds =
+    (captureSessionIds ?? isTaskScoped) && !isRemoteBackend;
   const effectiveSessionId =
     type === "console" && effectiveModel && isTaskScoped && activeTask
       ? effectiveModel === "claude"
@@ -97,6 +120,7 @@ export function TerminalPane({
     !!activeTask &&
     !!effectiveCwd &&
     !!effectiveModel &&
+    !isRemoteBackend &&
     !effectiveSessionId &&
     !!activeTask.linear_issue_id &&
     !activeTask.linear_issue_started_at;
@@ -141,6 +165,7 @@ export function TerminalPane({
     activeTask?.id,
     effectiveCwd,
     activeRepo?.project_id,
+    isRemoteBackend,
   ]);
 
   const modelLabel =
@@ -161,13 +186,27 @@ export function TerminalPane({
     canEmbed && type === "console" ? getConsoleDimensions(layout) : null;
 
   const command =
-    type === "console" && effectiveModel
-      ? buildLlmCommand(
-          effectiveModel,
-          effectiveSessionId,
-          effectiveCwd ?? undefined,
-        )
-      : undefined;
+    type === "terminal"
+      ? backend && effectiveCwd
+        ? openBackendShellCommand(backend, effectiveCwd)
+        : undefined
+      : type === "console" && effectiveModel && effectiveCwd
+        ? backend
+          ? isRemoteBackend
+            ? openBackendLlmCommand(backend, effectiveCwd, effectiveModel)
+            : buildLlmCommand(
+                effectiveModel,
+                effectiveSessionId,
+                effectiveCwd ?? undefined,
+              )
+          : buildLlmCommand(
+              effectiveModel,
+              effectiveSessionId,
+              effectiveCwd ?? undefined,
+            )
+        : undefined;
+  const sessionCwd =
+    isRemoteBackend && effectiveCwd ? homedir() : effectiveCwd ?? homedir();
 
   // Session ID capture for console pane — runs whenever session ID is missing
   useEffect(() => {
@@ -176,6 +215,7 @@ export function TerminalPane({
       !canEmbed ||
       !activeTask ||
       !isTaskScoped ||
+      isRemoteBackend ||
       !shouldCaptureSessionIds
     ) {
       return;
@@ -241,6 +281,7 @@ export function TerminalPane({
     canEmbed,
     shouldCaptureSessionIds,
     isTaskScoped,
+    isRemoteBackend,
     type,
   ]);
 
@@ -316,7 +357,8 @@ export function TerminalPane({
       !isTaskScoped ||
       !activeTask ||
       activeTask.model !== "claude" ||
-      !activeTask.worktree_path
+      !activeTask.worktree_path ||
+      isRemoteBackend
     ) {
       return;
     }
@@ -337,6 +379,7 @@ export function TerminalPane({
   }, [
     activeTask,
     isTaskScoped,
+    isRemoteBackend,
     setActiveTask,
     setTasks,
     type,
@@ -370,7 +413,7 @@ export function TerminalPane({
         <EmbeddedTerminal
           key={embeddedKey}
           taskId={embeddedTaskId}
-          cwd={effectiveCwd!}
+          cwd={sessionCwd}
           command={command}
           focused={isFocused}
           paused={paused}

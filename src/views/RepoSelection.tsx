@@ -1,9 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text, useInput } from "ink";
-import InkTextInput from "ink-text-input";
 import { mkdirSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
 import { useStore } from "../store/index.js";
 import {
   createProject,
@@ -19,6 +16,7 @@ import {
 import { StatusDots } from "../components/StatusDots.js";
 import { destroySession } from "../services/terminalManager.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
+import { NewProjectModal } from "../components/NewProjectModal.js";
 import type { Repo } from "../store/types.js";
 import { deleteWorktree } from "../services/worktree.js";
 
@@ -31,6 +29,7 @@ export function RepoSelection() {
   const setActiveRepo = useStore((s) => s.setActiveRepo);
   const setActiveTask = useStore((s) => s.setActiveTask);
   const setView = useStore((s) => s.setView);
+  const setBackendReachability = useStore((s) => s.setBackendReachability);
   const addingRepo = useStore((s) => s.addingRepo);
   const setAddingRepo = useStore((s) => s.setAddingRepo);
   const setTasks = useStore((s) => s.setTasks);
@@ -41,8 +40,6 @@ export function RepoSelection() {
   const [repoTaskIds, setRepoTaskIds] = useState<Record<string, string[]>>({});
   const [confirmDelete, setConfirmDelete] = useState<Repo | null>(null);
   const [deletingRepoId, setDeletingRepoId] = useState<string | null>(null);
-  const [createProjectName, setCreateProjectName] = useState("");
-  const [createProjectError, setCreateProjectError] = useState("");
   const [refreshingProjects, setRefreshingProjects] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState("");
 
@@ -69,32 +66,32 @@ export function RepoSelection() {
 
   useEffect(() => {
     if (addingRepo) {
-      setCreateProjectName("");
-      setCreateProjectError("");
       setError("");
     }
   }, [addingRepo]);
 
-  const handleCreateProject = (value: string) => {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      setCreateProjectError("Project name cannot be empty.");
-      return;
-    }
-    if (/[\\/]/.test(trimmed)) {
-      setCreateProjectError("Project name cannot include path separators.");
-      return;
-    }
-
-    const projectPath = join(homedir(), trimmed);
-
+  const handleCreateProject = async (draft: {
+    name: string;
+    path: string;
+    backendKind: "local" | "ssh";
+    backendTarget?: string | null;
+    backendBasePath?: string | null;
+    backendDisplayName?: string | null;
+  }): Promise<string | null> => {
     try {
-      mkdirSync(projectPath, { recursive: true });
-      const project = createProject(trimmed, projectPath);
+      if (draft.backendKind === "local") {
+        mkdirSync(draft.path, { recursive: true });
+      }
+      const project = createProject({
+        name: draft.name,
+        path: draft.path,
+        backendKind: draft.backendKind,
+        backendTarget: draft.backendTarget,
+        backendBasePath: draft.backendBasePath ?? draft.path,
+        backendDisplayName: draft.backendDisplayName,
+      });
 
       setAddingRepo(false);
-      setCreateProjectName("");
-      setCreateProjectError("");
       setError("");
 
       setActiveRepo(null);
@@ -103,8 +100,11 @@ export function RepoSelection() {
       touchProject(project.id);
       setActiveProject(project);
       setView("projectView");
+      return null;
     } catch (e: any) {
-      setCreateProjectError(e.message || "Failed to create project.");
+      const message = e.message || "Failed to create project.";
+      setError(message);
+      return message;
     }
   };
 
@@ -126,7 +126,7 @@ export function RepoSelection() {
 
         for (const task of repoTasks) {
           if (!task.worktree_path) continue;
-          await deleteWorktree(repo.path, task.worktree_path, task.branch_name);
+          await deleteWorktree(repo, task.worktree_path, task.branch_name);
         }
 
         const deletedTaskIds = new Set(repoTasks.map((t) => t.id));
@@ -192,11 +192,15 @@ export function RepoSelection() {
       for (const project of projects) {
         try {
           const result = refreshProjectRepos(project.id);
+          setBackendReachability(project.id, "online");
           refreshed += 1;
           discovered += result.discovered;
           added += result.added;
           reassigned += result.reassigned;
         } catch (e: any) {
+          if (project.backend_kind === "ssh") {
+            setBackendReachability(project.id, "offline");
+          }
           failures.push(`${project.name}: ${e.message || "refresh failed"}`);
         }
       }
@@ -218,11 +222,6 @@ export function RepoSelection() {
     if (deletingRepoId) return;
 
     if (addingRepo) {
-      if (key.escape) {
-        setAddingRepo(false);
-        setCreateProjectName("");
-        setCreateProjectError("");
-      }
       return;
     }
 
@@ -294,7 +293,14 @@ export function RepoSelection() {
         const showProjectHeader =
           !previous || previous.project_name !== repo.project_name;
         const isDeleting = deletingRepoId === repo.id;
-        const dots = { green: 0, red: 0, orange: 0, yellow: 0, purple: 0 };
+        const dots = {
+          green: 0,
+          red: 0,
+          orange: 0,
+          yellow: 0,
+          purple: 0,
+          gray: 0,
+        };
         for (const tid of repoTaskIds[repo.id] || []) {
           const c = taskStatuses[tid];
           if (c === "green") dots.green++;
@@ -302,6 +308,7 @@ export function RepoSelection() {
           else if (c === "orange") dots.orange++;
           else if (c === "yellow") dots.yellow++;
           else if (c === "purple") dots.purple++;
+          else if (c === "gray") dots.gray++;
         }
         return (
           <Box key={repo.id} flexDirection="column">
@@ -345,41 +352,10 @@ export function RepoSelection() {
       )}
 
       {addingRepo && (
-        <Box
-          flexDirection="column"
-          marginTop={1}
-          borderStyle="single"
-          borderColor="cyan"
-          paddingX={1}
-          paddingY={1}
-        >
-          <Text bold color="cyan">
-            Create Project
-          </Text>
-          <Box marginTop={1}>
-            <Text>Name: </Text>
-            <InkTextInput
-              value={createProjectName}
-              onChange={setCreateProjectName}
-              onSubmit={handleCreateProject}
-            />
-          </Box>
-          {createProjectName.trim() && (
-            <Box marginTop={1}>
-              <Text dimColor>
-                Folder: {join(homedir(), createProjectName.trim())}
-              </Text>
-            </Box>
-          )}
-          {createProjectError && (
-            <Box marginTop={1}>
-              <Text color="red">{createProjectError}</Text>
-            </Box>
-          )}
-          <Box marginTop={1}>
-            <Text dimColor>⏎ Create Esc Cancel</Text>
-          </Box>
-        </Box>
+        <NewProjectModal
+          onCancel={() => setAddingRepo(false)}
+          onSubmit={handleCreateProject}
+        />
       )}
 
       {error && (
