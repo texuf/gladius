@@ -45,13 +45,22 @@ function getBackendForPath(repoPath: string) {
   });
 }
 
-async function runGit(repoPath: string, args: string[]): Promise<string> {
+export async function runGitCommand(
+  repoPath: string,
+  args: string[],
+): Promise<string> {
   const backend = getBackendForPath(repoPath);
   if (backend?.kind === "ssh") {
     const command = `git ${args.map((arg) => quoteShell(arg)).join(" ")}`;
     const result = runBackendCommand(backend, command);
     if (result.exitCode !== 0) {
-      throw new Error((result.stderr || result.stdout || "git command failed").trim());
+      const error = new Error(
+        (result.stderr || result.stdout || "git command failed").trim(),
+      ) as Error & { stdout?: string; stderr?: string; exitCode?: number };
+      error.stdout = result.stdout;
+      error.stderr = result.stderr;
+      error.exitCode = result.exitCode;
+      throw error;
     }
     return result.stdout;
   }
@@ -59,15 +68,17 @@ async function runGit(repoPath: string, args: string[]): Promise<string> {
   return await $`git ${args}`.text();
 }
 
-async function runGh(args: string[]): Promise<string> {
+export async function runGhCommand(args: string[]): Promise<string> {
   return await $`gh ${args}`.text();
 }
 
 async function getRemoteUrl(repoPath: string): Promise<string> {
-  return (await runGit(repoPath, ["-C", repoPath, "remote", "get-url", "origin"])).trim();
+  return (
+    await runGitCommand(repoPath, ["-C", repoPath, "remote", "get-url", "origin"])
+  ).trim();
 }
 
-async function getRepoSlug(repoPath: string): Promise<string | null> {
+export async function getRepoSlugForPath(repoPath: string): Promise<string | null> {
   const parsed = parseOwnerRepo(await getRemoteUrl(repoPath));
   if (!parsed) return null;
   return `${parsed.owner}/${parsed.repo}`;
@@ -124,7 +135,7 @@ export async function getGitStatus(
   try {
     // Resolve upstream tracking branch (if configured for this branch)
     upstream = (
-      await runGit(repoPath, [
+      await runGitCommand(repoPath, [
         "-C",
         repoPath,
         "rev-parse",
@@ -141,7 +152,7 @@ export async function getGitStatus(
     _tracksMain = upstreamBranch === "main" || upstreamBranch === "master";
 
     try {
-      const revList = await runGit(repoPath, [
+      const revList = await runGitCommand(repoPath, [
         "-C",
         repoPath,
         "rev-list",
@@ -163,7 +174,7 @@ export async function getGitStatus(
   try {
     // Behind main
     const main = await getMainBranch(repoPath);
-    const behindMainResult = await runGit(repoPath, [
+    const behindMainResult = await runGitCommand(repoPath, [
       "-C",
       repoPath,
       "rev-list",
@@ -177,7 +188,7 @@ export async function getGitStatus(
 
   try {
     // Changed files
-    const status = await runGit(repoPath, [
+    const status = await runGitCommand(repoPath, [
       "-C",
       repoPath,
       "status",
@@ -304,7 +315,7 @@ async function getOpenPrStatusesForRepo(
 
   const fetchPromise = (async () => {
     try {
-      const raw = await $`gh api graphql -f query=${query}`.text();
+      const raw = await runGhCommand(["api", "graphql", "-f", `query=${query}`]);
       const data = JSON.parse(raw);
       const prs = data?.data?.repository?.pullRequests?.nodes || [];
       const openByBranch = new Map<string, PrCandidate>();
@@ -513,7 +524,7 @@ function isConflicting(mergeable: string): boolean {
 
 export async function getCurrentBranch(repoPath: string): Promise<string> {
   try {
-    const result = await runGit(repoPath, [
+    const result = await runGitCommand(repoPath, [
       "-C",
       repoPath,
       "rev-parse",
@@ -558,7 +569,7 @@ export function formatGitStatus(status: GitStatus): string {
 
 export async function fetchLatestMain(repoPath: string): Promise<void> {
   try {
-    await runGit(repoPath, ["-C", repoPath, "fetch", "--prune", "origin"]);
+    await runGitCommand(repoPath, ["-C", repoPath, "fetch", "--prune", "origin"]);
   } catch {}
 }
 
@@ -612,7 +623,7 @@ export async function getPrComments(
     const repoSlug = `${parsed.owner}/${parsed.repo}`;
 
     // Get PR number first
-    const prJson = await runGh([
+    const prJson = await runGhCommand([
       "pr",
       "view",
       branchName,
@@ -646,7 +657,7 @@ export async function getPrComments(
       }
     }`;
 
-    const gql = await runGh(["api", "graphql", "-f", `query=${query}`]);
+    const gql = await runGhCommand(["api", "graphql", "-f", `query=${query}`]);
     const data = JSON.parse(gql);
     const threads =
       data?.data?.repository?.pullRequest?.reviewThreads?.nodes || [];
@@ -674,7 +685,7 @@ export async function getPrComments(
  */
 export async function resolveThread(threadId: string): Promise<boolean> {
   try {
-    await runGh([
+    await runGhCommand([
       "api",
       "graphql",
       "-f",
@@ -888,7 +899,7 @@ export async function getCiFailures(
     const repoSlug = `${parsed.owner}/${parsed.repo}`;
 
     // Get head SHA from PR
-    const prJson = await runGh([
+    const prJson = await runGhCommand([
       "pr",
       "view",
       branchName,
@@ -901,14 +912,14 @@ export async function getCiFailures(
 
     // Get failed workflow runs for this commit
     const runsEndpoint = `repos/${parsed.owner}/${parsed.repo}/actions/runs?head_sha=${sha}&status=failure`;
-    const runsJson = await runGh(["api", runsEndpoint]);
+    const runsJson = await runGhCommand(["api", runsEndpoint]);
     const { workflow_runs: runs } = JSON.parse(runsJson);
     if (!runs || runs.length === 0) return [];
 
     // Get failed jobs across all failed runs in parallel
     const jobResults = await Promise.all(
       (runs as any[]).map(async (run: any) => {
-        const jobsJson = await runGh([
+        const jobsJson = await runGhCommand([
           "api",
           `repos/${parsed.owner}/${parsed.repo}/actions/runs/${run.id}/jobs`,
         ]);
@@ -933,7 +944,7 @@ export async function getCiFailures(
 
         if (failedStep) {
           try {
-            const rawLog = await runGh([
+            const rawLog = await runGhCommand([
               "api",
               `repos/${parsed.owner}/${parsed.repo}/actions/jobs/${job.id}/logs`,
             ]);
@@ -961,7 +972,7 @@ export async function getCiFailures(
  */
 export async function getMainBranch(repoPath: string): Promise<string> {
   try {
-    const ref = await runGit(repoPath, [
+    const ref = await runGitCommand(repoPath, [
       "-C",
       repoPath,
       "symbolic-ref",
@@ -984,7 +995,7 @@ export async function getCommitLog(
   const main = mainBranch || (await getMainBranch(repoPath));
   try {
     return (
-      await runGit(repoPath, [
+      await runGitCommand(repoPath, [
         "-C",
         repoPath,
         "log",
@@ -1007,7 +1018,7 @@ export async function getDiffStat(
   const main = mainBranch || (await getMainBranch(repoPath));
   try {
     return (
-      await runGit(repoPath, [
+      await runGitCommand(repoPath, [
         "-C",
         repoPath,
         "diff",
@@ -1027,8 +1038,8 @@ export async function stageAndCommit(
   repoPath: string,
   message: string,
 ): Promise<void> {
-  await runGit(repoPath, ["-C", repoPath, "add", "."]);
-  await runGit(repoPath, ["-C", repoPath, "commit", "-m", message]);
+  await runGitCommand(repoPath, ["-C", repoPath, "add", "."]);
+  await runGitCommand(repoPath, ["-C", repoPath, "commit", "-m", message]);
 }
 
 /**
@@ -1038,7 +1049,7 @@ export async function pushBranch(
   repoPath: string,
   branchName: string,
 ): Promise<void> {
-  await runGit(repoPath, [
+  await runGitCommand(repoPath, [
     "-C",
     repoPath,
     "push",
@@ -1057,7 +1068,7 @@ export async function createPullRequest(
   body: string,
   reviewers: string[],
 ): Promise<{ number: number; url: string }> {
-  const repoSlug = await getRepoSlug(repoPath);
+  const repoSlug = await getRepoSlugForPath(repoPath);
   if (!repoSlug) {
     throw new Error("Could not determine repo slug from origin remote.");
   }
@@ -1083,7 +1094,7 @@ export async function createPullRequest(
     baseBranch,
     ...reviewerArgs,
   ];
-  const result = await runGh(allArgs);
+  const result = await runGhCommand(allArgs);
   // gh pr create outputs the PR URL on the last line
   const url = result.trim().split("\n").pop()!.trim();
   const numMatch = url.match(/\/pull\/(\d+)/);
@@ -1111,7 +1122,7 @@ export async function getCommitsSince(
     if (author) {
       args.push(`--author=${author}`);
     }
-    return (await runGit(repoPath, args)).trim();
+    return (await runGitCommand(repoPath, args)).trim();
   } catch {
     return "";
   }
@@ -1128,7 +1139,7 @@ export async function getCommitsSinceOnBranch(
 ): Promise<string> {
   try {
     return (
-      await runGit(repoPath, [
+      await runGitCommand(repoPath, [
         "-C",
         repoPath,
         "log",
@@ -1168,7 +1179,7 @@ export async function getMergedPrsSince(
   options?: { author?: string },
 ): Promise<MergedPr[]> {
   try {
-    const repoSlug = await getRepoSlug(repoPath);
+    const repoSlug = await getRepoSlugForPath(repoPath);
     if (!repoSlug) return [];
     const args = [
       "pr",
@@ -1189,7 +1200,7 @@ export async function getMergedPrsSince(
       args.push("--author", author);
     }
 
-    const raw = await runGh(args);
+    const raw = await runGhCommand(args);
     const prs = JSON.parse(raw);
     if (!Array.isArray(prs)) return [];
     const sinceMs = Date.parse(sinceISO);
@@ -1220,7 +1231,7 @@ export async function getPrsCreatedSince(
   options?: { author?: string },
 ): Promise<OpenedPr[]> {
   try {
-    const repoSlug = await getRepoSlug(repoPath);
+    const repoSlug = await getRepoSlugForPath(repoPath);
     if (!repoSlug) return [];
     const args = [
       "pr",
@@ -1241,7 +1252,7 @@ export async function getPrsCreatedSince(
       args.push("--author", author);
     }
 
-    const raw = await runGh(args);
+    const raw = await runGhCommand(args);
     const prs = JSON.parse(raw);
     if (!Array.isArray(prs)) return [];
     const sinceMs = Date.parse(sinceISO);

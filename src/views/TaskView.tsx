@@ -16,7 +16,10 @@ import {
   getCurrentBranch,
   getGitStatus,
   getGitStatusWithPr,
+  getRepoSlugForPath,
   pushBranch,
+  runGhCommand,
+  runGitCommand,
 } from "../services/git.js";
 import {
   refreshAllTaskStatuses,
@@ -248,7 +251,15 @@ export function TaskView() {
     try {
       const branch = await getCurrentBranch(repoPath);
       if (force) {
-        await $`git -C ${repoPath} push --force-with-lease -u origin ${branch}`.text();
+        await runGitCommand(repoPath, [
+          "-C",
+          repoPath,
+          "push",
+          "--force-with-lease",
+          "-u",
+          "origin",
+          branch,
+        ]);
       } else {
         await pushBranch(repoPath, branch);
       }
@@ -269,6 +280,8 @@ export function TaskView() {
     const pr = activeTask ? gitStatuses[activeTask.id]?.pr : null;
     const hasLinearIssue = !!activeTask?.linear_issue_id?.trim();
     const hasWorktree = !!activeTask?.worktree_path;
+    const canOpenLocalTools =
+      hasWorktree && activeRepo?.project_backend_kind !== "ssh";
 
     setModal({
       type: "hotkeyMenu",
@@ -291,7 +304,7 @@ export function TaskView() {
         {
           key: "c",
           label: "Cursor",
-          disabled: !hasWorktree,
+          disabled: !canOpenLocalTools,
           onSelect: () => {
             void handleOpenCursor();
           },
@@ -299,7 +312,7 @@ export function TaskView() {
         {
           key: "t",
           label: "Tower",
-          disabled: !hasWorktree,
+          disabled: !canOpenLocalTools,
           onSelect: () => {
             void handleOpenTower();
           },
@@ -326,14 +339,27 @@ export function TaskView() {
     let aheadMain = 0;
     if (hasWorktree && isNonMainBranch && worktreePath) {
       try {
-        await $`git -C ${worktreePath} rev-parse --verify --quiet refs/remotes/origin/${branch}`.text();
+        await runGitCommand(worktreePath, [
+          "-C",
+          worktreePath,
+          "rev-parse",
+          "--verify",
+          "--quiet",
+          `refs/remotes/origin/${branch}`,
+        ]);
         remoteBranchExists = true;
       } catch {}
 
       if (remoteBranchExists) {
         try {
-          const revList =
-            await $`git -C ${worktreePath} rev-list --left-right --count ${branch}...origin/${branch} 2>/dev/null`.text();
+          const revList = await runGitCommand(worktreePath, [
+            "-C",
+            worktreePath,
+            "rev-list",
+            "--left-right",
+            "--count",
+            `${branch}...origin/${branch}`,
+          ]);
           const parts = revList.trim().split(/\s+/);
           if (parts.length === 2) {
             aheadRemote = parseInt(parts[0], 10) || 0;
@@ -343,13 +369,23 @@ export function TaskView() {
       }
 
       try {
-        const aheadMainResult =
-          await $`git -C ${worktreePath} rev-list --count origin/main..${branch} 2>/dev/null`.text();
+        const aheadMainResult = await runGitCommand(worktreePath, [
+          "-C",
+          worktreePath,
+          "rev-list",
+          "--count",
+          `origin/main..${branch}`,
+        ]);
         aheadMain = parseInt(aheadMainResult.trim(), 10) || 0;
       } catch {
         try {
-          const aheadMasterResult =
-            await $`git -C ${worktreePath} rev-list --count origin/master..${branch} 2>/dev/null`.text();
+          const aheadMasterResult = await runGitCommand(worktreePath, [
+            "-C",
+            worktreePath,
+            "rev-list",
+            "--count",
+            `origin/master..${branch}`,
+          ]);
           aheadMain = parseInt(aheadMasterResult.trim(), 10) || 0;
         } catch {}
       }
@@ -593,10 +629,16 @@ export function TaskView() {
     setModal(null);
     setFetching(true);
     try {
-      const remoteUrl = (
-        await $`git -C ${activeTask.worktree_path} remote get-url origin`.text()
-      ).trim();
-      await $`gh pr merge ${prNumber} --squash --repo ${remoteUrl}`;
+      const repoSlug = await getRepoSlugForPath(activeTask.worktree_path);
+      if (!repoSlug) return;
+      await runGhCommand([
+        "pr",
+        "merge",
+        String(prNumber),
+        "--squash",
+        "--repo",
+        repoSlug,
+      ]);
       // Refresh PR status to show merged
       await pollPr();
     } catch {}
@@ -608,11 +650,17 @@ export function TaskView() {
     const pr = gitStatuses[activeTask.id]?.pr;
     if (!pr) return;
     try {
-      const remoteUrl = (
-        await $`git -C ${activeTask.worktree_path} remote get-url origin`.text()
-      ).trim();
-      const prJson =
-        await $`gh pr view ${pr.number} --repo ${remoteUrl} --json url`.text();
+      const repoSlug = await getRepoSlugForPath(activeTask.worktree_path);
+      if (!repoSlug) return;
+      const prJson = await runGhCommand([
+        "pr",
+        "view",
+        String(pr.number),
+        "--repo",
+        repoSlug,
+        "--json",
+        "url",
+      ]);
       const { url } = JSON.parse(prJson) as { url?: string };
       if (url) {
         Bun.spawn(["open", url], { stdio: ["ignore", "ignore", "ignore"] });
@@ -622,9 +670,15 @@ export function TaskView() {
 
   const handleOpenTower = async () => {
     if (!activeTask?.worktree_path) return;
+    if (activeRepo?.project_backend_kind === "ssh") return;
     try {
       const repoRoot = (
-        await $`git -C ${activeTask.worktree_path} rev-parse --show-toplevel`.text()
+        await runGitCommand(activeTask.worktree_path, [
+          "-C",
+          activeTask.worktree_path,
+          "rev-parse",
+          "--show-toplevel",
+        ])
       ).trim();
       if (repoRoot) {
         Bun.spawn(["gittower", repoRoot], {
@@ -636,6 +690,7 @@ export function TaskView() {
 
   const handleOpenCursor = async () => {
     if (!activeTask?.worktree_path) return;
+    if (activeRepo?.project_backend_kind === "ssh") return;
     try {
       Bun.spawn(["cursor", "."], {
         cwd: activeTask.worktree_path,
@@ -678,9 +733,15 @@ export function TaskView() {
       }
 
       const [stagedDiff, unstagedDiff, untrackedNameOnly] = await Promise.all([
-        $`git -C ${repoPath} diff --cached --`.text(),
-        $`git -C ${repoPath} diff --`.text(),
-        $`git -C ${repoPath} ls-files --others --exclude-standard`.text(),
+        runGitCommand(repoPath, ["-C", repoPath, "diff", "--cached", "--"]),
+        runGitCommand(repoPath, ["-C", repoPath, "diff", "--"]),
+        runGitCommand(repoPath, [
+          "-C",
+          repoPath,
+          "ls-files",
+          "--others",
+          "--exclude-standard",
+        ]),
       ]);
 
       const diffSections: string[] = [];
@@ -706,12 +767,19 @@ export function TaskView() {
           MAX_UNTRACKED_FILES_IN_PROMPT,
         )) {
           try {
-            const patch =
-              await $`git -C ${repoPath} diff --no-index -- /dev/null ${relPath}`.text();
+            const patch = await runGitCommand(repoPath, [
+              "-C",
+              repoPath,
+              "diff",
+              "--no-index",
+              "--",
+              "/dev/null",
+              relPath,
+            ]);
             if (patch.trim()) patches.push(patch.trim());
           } catch (e: any) {
-            // `git diff --no-index` exits 1 when differences exist; Bun throws
-            // on non-zero exit, but stdout still contains the patch we need.
+            // `git diff --no-index` exits 1 when differences exist, but stdout
+            // still contains the patch we need.
             const patch = e?.stdout?.toString?.() || "";
             if (patch.trim()) patches.push(patch.trim());
           }
@@ -762,11 +830,17 @@ export function TaskView() {
         boundedDiff,
       );
 
-      await $`git -C ${repoPath} add -A --`.text();
-      await $`git -C ${repoPath} commit -m ${commitMsg}`.text();
+      await runGitCommand(repoPath, ["-C", repoPath, "add", "-A", "--"]);
+      await runGitCommand(repoPath, ["-C", repoPath, "commit", "-m", commitMsg]);
       const [commitSha, branch] = await Promise.all([
-        $`git -C ${repoPath} rev-parse --short HEAD`.text(),
-        $`git -C ${repoPath} rev-parse --abbrev-ref HEAD`.text(),
+        runGitCommand(repoPath, ["-C", repoPath, "rev-parse", "--short", "HEAD"]),
+        runGitCommand(repoPath, [
+          "-C",
+          repoPath,
+          "rev-parse",
+          "--abbrev-ref",
+          "HEAD",
+        ]),
       ]);
       addTaskEvent(activeTask.id, "commit", {
         action: "commit",

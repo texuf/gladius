@@ -1,4 +1,3 @@
-import { $ } from "bun";
 import {
   getAppState,
   setAppState,
@@ -12,6 +11,7 @@ import {
   getPrsCreatedSince,
   getMainBranch,
   formatPrStatus,
+  runGitCommand,
 } from "./git.js";
 import type { MergedPr, OpenedPr } from "./git.js";
 import { generateStandupSummary } from "./llm.js";
@@ -130,13 +130,17 @@ function toStandupCommitEvent(event: TaskEvent): StandupCommitEvent | null {
 
 async function getRepoAuthorFilter(repoPath: string): Promise<string | null> {
   try {
-    const email = (await $`git -C ${repoPath} config user.email`.text()).trim();
+    const email = (
+      await runGitCommand(repoPath, ["-C", repoPath, "config", "user.email"])
+    ).trim();
     if (email) return email;
   } catch {
     // ignore
   }
   try {
-    const name = (await $`git -C ${repoPath} config user.name`.text()).trim();
+    const name = (
+      await runGitCommand(repoPath, ["-C", repoPath, "config", "user.name"])
+    ).trim();
     if (name) return name;
   } catch {
     // ignore
