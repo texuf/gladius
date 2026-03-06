@@ -139,7 +139,7 @@ export function HotkeyHints() {
   } else if (view === "createPr") {
     hints.push("Esc Cancel");
   } else if (view === "prComments") {
-    hints.push("↑↓ Navigate", "Space Select/Deselect");
+    hints.push("↑↓ Navigate", "Space Select/Deselect", "c Comment");
     if (prCommentsHasSelection) {
       hints.push("⏎ Send+Commit", "p Send");
     }

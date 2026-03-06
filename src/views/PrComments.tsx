@@ -9,6 +9,7 @@ import {
 } from "../services/git.js";
 import { writeToSession } from "../services/terminalManager.js";
 import type { ReviewThread, CiCheckFailure } from "../store/types.js";
+import { WrappedTextInputField } from "../components/TextInput.js";
 
 const MAX_DETAIL_LOG_LINES = 40;
 type IssueItem =
@@ -63,6 +64,12 @@ function formatCiFailureForPaste(failure: CiCheckFailure): string {
   return lines.join("\n");
 }
 
+function appendIssueNote(text: string, note?: string): string {
+  const trimmed = note?.trim();
+  if (!trimmed) return text;
+  return `${text}\n\nAdditional note:\n${trimmed}`;
+}
+
 export function PrComments() {
   const activeTask = useStore((s) => s.activeTask);
   const setView = useStore((s) => s.setView);
@@ -81,6 +88,9 @@ export function PrComments() {
   const [selectedIssueKeys, setSelectedIssueKeys] = useState<Set<string>>(
     new Set(),
   );
+  const [issueNotes, setIssueNotes] = useState<Record<string, string>>({});
+  const [editingNoteKey, setEditingNoteKey] = useState<string | null>(null);
+  const [editingNoteValue, setEditingNoteValue] = useState("");
   const [loadingComments, setLoadingComments] = useState(true);
   const [loadingCi, setLoadingCi] = useState(true);
 
@@ -110,6 +120,7 @@ export function PrComments() {
     : null;
   const selectedThread =
     selectedItem?.kind === "thread" ? selectedItem.value : null;
+  const selectedIssueNote = selectedItem ? issueNotes[selectedItem.key] ?? "" : "";
 
   useEffect(() => {
     setSelected((prev) => {
@@ -126,6 +137,18 @@ export function PrComments() {
       for (const key of prev) {
         if (currentKeys.has(key)) {
           next.add(key);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    setIssueNotes((prev) => {
+      let changed = false;
+      const next: Record<string, string> = {};
+      for (const [key, value] of Object.entries(prev)) {
+        if (currentKeys.has(key)) {
+          next[key] = value;
         } else {
           changed = true;
         }
@@ -152,6 +175,9 @@ export function PrComments() {
   useEffect(() => {
     setSelected(0);
     setSelectedIssueKeys(new Set());
+    setIssueNotes({});
+    setEditingNoteKey(null);
+    setEditingNoteValue("");
     setLoadingComments(true);
     setLoadingCi(true);
 
@@ -262,13 +288,23 @@ export function PrComments() {
     if (selectedCiFailures.length > 0) {
       parts.push("Please fix these CI failures:\n");
       for (const item of selectedCiFailures) {
-        parts.push(formatCiFailureForPaste(item.value));
+        parts.push(
+          appendIssueNote(
+            formatCiFailureForPaste(item.value),
+            issueNotes[item.key],
+          ),
+        );
       }
     }
     if (selectedThreads.length > 0) {
       parts.push("Please fix these PR review comments:\n");
       for (const item of selectedThreads) {
-        parts.push(formatThreadForPaste(item.value));
+        parts.push(
+          appendIssueNote(
+            formatThreadForPaste(item.value),
+            issueNotes[item.key],
+          ),
+        );
       }
     }
     parts.push(`\n${finalInstruction}`);
@@ -277,6 +313,7 @@ export function PrComments() {
 
   useInput((input, key) => {
     if (useStore.getState().modal?.type === "hotkeyMenu") return;
+    if (editingNoteKey) return;
     if (key.escape) {
       goBack();
       return;
@@ -319,6 +356,12 @@ export function PrComments() {
         "kindly address these issues, but don't commit or push",
       );
       returnToConsoleWithPrompt(prompt);
+      return;
+    }
+
+    if (input === "c" && selectedItem) {
+      setEditingNoteKey(selectedItem.key);
+      setEditingNoteValue(issueNotes[selectedItem.key] ?? "");
       return;
     }
 
@@ -396,6 +439,9 @@ export function PrComments() {
                       {isMarked ? "[x] " : "[ ] "}
                       <Text color="red">CI: </Text>
                       {f.name}
+                      {issueNotes[issueKey]?.trim() && (
+                        <Text color="yellow"> [note]</Text>
+                      )}
                     </Text>
                     <Text dimColor wrap="truncate">
                       {"         "}
@@ -441,6 +487,9 @@ export function PrComments() {
                       {isSelected ? " \u25B8 " : "   "}
                       {isMarked ? "[x] " : "[ ] "}
                       {t.path}:{t.line}
+                      {issueNotes[issueKey]?.trim() && (
+                        <Text color="yellow"> [note]</Text>
+                      )}
                     </Text>
                     <Text dimColor wrap="truncate">
                       {"         "}@{previewComment?.author ?? "unknown"}:{" "}
@@ -488,6 +537,15 @@ export function PrComments() {
                     <Text dimColor>No log output available.</Text>
                   </>
                 )}
+                {selectedIssueNote.trim() && (
+                  <>
+                    <Box marginTop={1} />
+                    <Text bold color="yellow">
+                      Your note
+                    </Text>
+                    <Text wrap="wrap">{selectedIssueNote}</Text>
+                  </>
+                )}
               </>
             )}
             {selectedThread && (
@@ -517,11 +575,50 @@ export function PrComments() {
                     </Box>
                   ));
                 })()}
+                {selectedIssueNote.trim() && (
+                  <>
+                    <Box marginTop={1} />
+                    <Text bold color="yellow">
+                      Your note
+                    </Text>
+                    <Text wrap="wrap">{selectedIssueNote}</Text>
+                  </>
+                )}
               </>
             )}
           </Box>
         )}
       </Box>
+      {editingNoteKey && (
+        <WrappedTextInputField
+          label="Issue Note (blank clears)"
+          value={editingNoteValue}
+          onChange={setEditingNoteValue}
+          onSubmit={(value) => {
+            const trimmed = value.trim();
+            setIssueNotes((prev) => {
+              const next = { ...prev };
+              if (trimmed) {
+                next[editingNoteKey] = trimmed;
+              } else {
+                delete next[editingNoteKey];
+              }
+              return next;
+            });
+            setSelectedIssueKeys((prev) => {
+              if (!trimmed || prev.has(editingNoteKey)) return prev;
+              return new Set(prev).add(editingNoteKey);
+            });
+            setEditingNoteKey(null);
+            setEditingNoteValue("");
+          }}
+          onCancel={() => {
+            setEditingNoteKey(null);
+            setEditingNoteValue("");
+          }}
+          placeholder="Optional extra instruction for this issue"
+        />
+      )}
     </Box>
   );
 }
