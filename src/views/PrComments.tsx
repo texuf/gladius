@@ -315,7 +315,9 @@ export function PrComments() {
     }
 
     if (input === "p" && activeTask && selectedIssueKeys.size > 0) {
-      const prompt = buildSelectedIssuesPrompt("kindly address these issues");
+      const prompt = buildSelectedIssuesPrompt(
+        "kindly address these issues, but don't commit or push",
+      );
       returnToConsoleWithPrompt(prompt);
       return;
     }

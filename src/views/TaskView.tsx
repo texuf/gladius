@@ -18,7 +18,10 @@ import {
   getGitStatusWithPr,
   pushBranch,
 } from "../services/git.js";
-import { refreshAllTaskStatuses } from "../services/taskStatus.js";
+import {
+  refreshAllTaskStatuses,
+  refreshTaskStatus,
+} from "../services/taskStatus.js";
 import {
   addTaskEvent,
   closeTask as dbCloseTask,
@@ -67,7 +70,9 @@ export function TaskView() {
 
   const markConsoleInteracted = (taskId: string) => {
     useStore.getState().markConsoleInteracted(taskId);
-    void refreshAllTaskStatuses();
+    if (activeTask && activeTask.id === taskId) {
+      void refreshTaskStatus(activeTask);
+    }
   };
 
   const resetDeadConsoleSession = () => {
@@ -129,16 +134,18 @@ export function TaskView() {
   const pollGit = () => {
     if (!activeTask?.worktree_path) return Promise.resolve();
     return getGitStatus(activeTask.worktree_path).then((status) => {
+      const mergedStatus = {
+        ...status,
+        pr: useStore.getState().gitStatuses[activeTask.id]?.pr ?? null,
+      };
       // Merge git fields atomically, preserving whatever PR data exists
       useStore.setState((state) => ({
         gitStatuses: {
           ...state.gitStatuses,
-          [activeTask.id]: {
-            ...status,
-            pr: state.gitStatuses[activeTask.id]?.pr ?? null,
-          },
+          [activeTask.id]: mergedStatus,
         },
       }));
+      return refreshTaskStatus(activeTask, mergedStatus).then(() => {});
     });
   };
   const pollPr = (forceRefresh = false) => {
@@ -150,6 +157,7 @@ export function TaskView() {
     })
       .then((status) => {
         setGitStatus(activeTask.id, status);
+        void refreshTaskStatus(activeTask, status);
         // Stop polling once checks are settled (nothing pending)
         if (status.pr && status.pr.ciPending === 0 && prIntervalRef.current) {
           clearInterval(prIntervalRef.current);

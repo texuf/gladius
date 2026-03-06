@@ -19,6 +19,11 @@ import {
   getRecentTaskPrompts,
 } from "../services/taskPrompt.js";
 import type { Reviewer } from "../store/types.js";
+import {
+  normalizeReviewerHotkey,
+  normalizeReviewers,
+  parseStoredReviewers,
+} from "../utils/reviewers.js";
 
 type Phase =
   | "init"
@@ -83,8 +88,7 @@ export function CreatePr() {
         const status = await getGitStatus(repoPath, branchName);
 
         // Load reviewers from app_state
-        const globalJson = getAppState("reviewers.global");
-        const reviewers: Reviewer[] = globalJson ? JSON.parse(globalJson) : [];
+        const reviewers = parseStoredReviewers(getAppState("reviewers.global"));
         reviewers.sort((a, b) => a.name.localeCompare(b.name));
         setGlobalReviewers(reviewers);
 
@@ -242,9 +246,10 @@ export function CreatePr() {
     const reviewer: Reviewer = {
       name: trimName || trimHandle,
       handle: trimHandle,
+      hotkey: null,
     };
-    const updated = [...globalReviewers, reviewer].sort((a, b) =>
-      a.name.localeCompare(b.name),
+    const updated = normalizeReviewers([...globalReviewers, reviewer]).sort(
+      (a, b) => a.name.localeCompare(b.name),
     );
     setGlobalReviewers(updated);
     setAppState("reviewers.global", JSON.stringify(updated));
@@ -285,6 +290,10 @@ export function CreatePr() {
         setReviewerIndex(
           Math.min(globalReviewers.length - 1, reviewerIndex + 1),
         );
+      } else if (key.ctrl && input === "n") {
+        setAddingReviewer({ step: "name", name: "" });
+        setAddName("");
+        setAddHandle("");
       } else if (input === " " && globalReviewers.length > 0) {
         const handle = globalReviewers[reviewerIndex]?.handle;
         if (handle) {
@@ -295,12 +304,23 @@ export function CreatePr() {
             return next;
           });
         }
-      } else if (input === "a") {
-        setAddingReviewer({ step: "name", name: "" });
-        setAddName("");
-        setAddHandle("");
-      } else if (key.return) {
-        handleGenerate();
+      } else {
+        const hotkey = normalizeReviewerHotkey(input);
+        const reviewer = hotkey
+          ? globalReviewers.find(
+              (candidate) => normalizeReviewerHotkey(candidate.hotkey) === hotkey,
+            )
+          : null;
+        if (reviewer) {
+          setSelectedHandles((prev) => {
+            const next = new Set(prev);
+            if (next.has(reviewer.handle)) next.delete(reviewer.handle);
+            else next.add(reviewer.handle);
+            return next;
+          });
+        } else if (key.return) {
+          handleGenerate();
+        }
       }
       return;
     }
@@ -347,12 +367,15 @@ export function CreatePr() {
         <Box flexDirection="column">
           <Box marginBottom={1}>
             <Text bold>Select Reviewers</Text>
-            <Text dimColor> Space: toggle a: add Enter: continue</Text>
+            <Text dimColor>
+              {" "}
+              Space: toggle a-z: hotkeys Ctrl+N: add Enter: continue
+            </Text>
           </Box>
 
           {globalReviewers.length === 0 && !addingReviewer && (
             <Text dimColor>
-              No reviewers configured. Press 'a' to add one, or Enter to skip.
+              No reviewers configured. Press Ctrl+N to add one, or Enter to skip.
             </Text>
           )}
 
@@ -364,7 +387,10 @@ export function CreatePr() {
                 <Text color={focused ? "cyan" : undefined} bold={focused}>
                   {focused ? "▸ " : "  "}
                   {selected ? "[x]" : "[ ]"} {r.name}{" "}
-                  <Text dimColor>@{r.handle}</Text>
+                  <Text dimColor>
+                    @{r.handle}
+                    {r.hotkey ? ` [${r.hotkey}]` : ""}
+                  </Text>
                 </Text>
               </Box>
             );

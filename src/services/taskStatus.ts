@@ -59,6 +59,31 @@ function inferLlmWorkingFromPane(content: string): boolean {
   );
 }
 
+function inferLlmNeedsInputFromPane(content: string): boolean {
+  const recent = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-20)
+    .join(" ")
+    .toLowerCase();
+
+  if (!recent) return false;
+  return (
+    recent.includes("do you want to proceed?") ||
+    (recent.includes("1. yes") && recent.includes("2. no")) ||
+    recent.includes("esc to cancel") ||
+    recent.includes("tab to amend") ||
+    recent.includes("ctrl+e to explain")
+  );
+}
+
+function inferLlmStatusFromPane(content: string): LlmActivityStatus {
+  if (inferLlmNeedsInputFromPane(content)) return "needsInput";
+  if (inferLlmWorkingFromPane(content)) return "working";
+  return "idle";
+}
+
 function toPromptTask(context: LlmContext): Task {
   return {
     id: context.id,
@@ -80,8 +105,14 @@ function toPromptTask(context: LlmContext): Task {
   };
 }
 
-async function getLlmActivityStatus(task: LlmContext): Promise<LlmActivityStatus> {
+async function getLlmActivityStatus(
+  task: LlmContext,
+): Promise<LlmActivityStatus> {
   if (task.model !== "claude" && task.model !== "codex") return "idle";
+
+  const paneContent = await captureTmuxPane(`gladius-${task.id}-console`);
+  const paneStatus = paneContent ? inferLlmStatusFromPane(paneContent) : "idle";
+  if (paneStatus === "needsInput") return "needsInput";
 
   const messages = getRecentTaskConversation(
     toPromptTask(task),
@@ -94,15 +125,17 @@ async function getLlmActivityStatus(task: LlmContext): Promise<LlmActivityStatus
     for (const msg of messages) {
       const ts = toTimestampMs(msg.timestamp);
       if (msg.role === "user") lastUserMs = Math.max(lastUserMs, ts);
-      if (msg.role === "assistant") lastAssistantMs = Math.max(lastAssistantMs, ts);
+      if (msg.role === "assistant")
+        lastAssistantMs = Math.max(lastAssistantMs, ts);
     }
-    return lastUserMs > lastAssistantMs ? "working" : "idle";
+    if (lastUserMs > lastAssistantMs) {
+      return paneStatus === "idle" ? "working" : paneStatus;
+    }
+    return paneStatus === "working" ? "working" : "idle";
   }
 
   // Fallback for sessions with no parseable message history yet.
-  const content = await captureTmuxPane(`gladius-${task.id}-console`);
-  if (!content) return "idle";
-  return inferLlmWorkingFromPane(content) ? "working" : "idle";
+  return paneStatus;
 }
 
 function resolveCombinedTaskColor(params: {
@@ -112,20 +145,14 @@ function resolveCombinedTaskColor(params: {
   consoleInteracted: boolean;
   consoleFocused: boolean;
 }): TaskStatusColor {
-  if (params.llmStatus === "working") {
-    return params.consoleFocused || params.consoleInteracted ? "yellow" : "orange";
-  }
-
+  if (params.llmStatus === "working") return "yellow";
+  if (params.llmStatus === "needsInput") return "red";
   if (params.prReadiness === "merged") return "purple";
   if (params.prReadiness === "attentionNeeded") return "red";
   if (params.prReadiness === "ciPending") return "yellow";
-
-  if (params.prReadiness === "readyToMerge") {
-    return params.gitStatus === "clean" ? "green" : "yellow";
-  }
-
   if (params.gitStatus === "dirty") return "orange";
-  return "none";
+  if (params.prReadiness === "readyToMerge") return "green";
+  return "red";
 }
 
 /**
@@ -152,10 +179,7 @@ export async function computeTaskStatus(
   let gitStatus: GitStatus | null = null;
   if (worktreePath) {
     try {
-      gitStatus = await getGitStatusWithPr(
-        worktreePath,
-        undefined,
-      );
+      gitStatus = await getGitStatusWithPr(worktreePath, undefined);
     } catch {
       gitStatus = null;
     }
@@ -202,11 +226,9 @@ export async function refreshAllTaskStatuses(options?: {
 
       if (task.worktree_path) {
         try {
-          gitStatus = await getGitStatusWithPr(
-            task.worktree_path,
-            undefined,
-            { forcePrRefresh: options?.forcePrRefresh === true },
-          );
+          gitStatus = await getGitStatusWithPr(task.worktree_path, undefined, {
+            forcePrRefresh: options?.forcePrRefresh === true,
+          });
         } catch {
           gitStatus = null;
         }
@@ -238,6 +260,35 @@ export async function refreshAllTaskStatuses(options?: {
   return taskStatuses;
 }
 
+/**
+ * Refresh status color for a single task using current store state and optional
+ * pre-fetched git status, then update the taskStatuses map in place.
+ */
+export async function refreshTaskStatus(
+  task: Task,
+  gitStatusOverride?: GitStatus | null,
+): Promise<TaskStatusColor> {
+  const state = useStore.getState();
+  const llmStatus = await getLlmActivityStatus(task);
+  const gitStatus = gitStatusOverride ?? state.gitStatuses[task.id] ?? null;
+  const isConsoleFocused =
+    state.focusPane === "console" && state.activeTask?.id === task.id;
+
+  const color = resolveTaskStatusColor(
+    task.id,
+    llmStatus,
+    gitStatus,
+    state.consoleInteractedTasks.has(task.id),
+    isConsoleFocused,
+  );
+
+  useStore.setState((prev) => ({
+    taskStatuses: { ...prev.taskStatuses, [task.id]: color },
+  }));
+
+  return color;
+}
+
 function resolveTaskStatusColor(
   taskId: string,
   llmStatus: LlmActivityStatus,
@@ -246,7 +297,7 @@ function resolveTaskStatusColor(
   consoleFocused: boolean,
 ): TaskStatusColor {
   let interacted = consoleInteracted;
-  if (interacted && llmStatus === "idle") {
+  if (interacted && llmStatus !== "working") {
     useStore.getState().clearConsoleInteracted(taskId);
     interacted = false;
   }

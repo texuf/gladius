@@ -58,7 +58,7 @@ export type PrReadiness =
   | "merged";
 
 export type GitWorkStatus = "clean" | "dirty";
-export type LlmActivityStatus = "working" | "idle";
+export type LlmActivityStatus = "working" | "needsInput" | "idle";
 
 export interface PrStatus {
   number: number;
@@ -95,6 +95,7 @@ export interface GitStatus {
 export interface Reviewer {
   name: string;
   handle: string;
+  hotkey?: string | null;
 }
 
 export type ViewState =

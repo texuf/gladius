@@ -8,6 +8,11 @@ import {
   setAppState,
 } from "../services/db.js";
 import type { Reviewer } from "../store/types.js";
+import {
+  normalizeReviewerHotkey,
+  normalizeReviewers,
+  parseStoredReviewers,
+} from "../utils/reviewers.js";
 
 const FIELDS = [
   { label: "Anthropic API Key", key: "settings.anthropic_api_key" },
@@ -26,9 +31,9 @@ export function Settings() {
   const [editingFieldKey, setEditingFieldKey] = useState<string | null>(null);
   const [editingReviewer, setEditingReviewer] = useState<{
     index: number;
-    step: "name" | "handle";
+    step: "name" | "handle" | "hotkey";
     draftName: string;
-    originalHandle: string;
+    draftHandle: string;
   } | null>(null);
   const [editValue, setEditValue] = useState("");
   const [values, setValues] = useState<Record<string, string | null>>({});
@@ -46,11 +51,7 @@ export function Settings() {
       loaded[f.key] = getAppState(f.key);
     }
     setValues(loaded);
-    const globalJson = getAppState("reviewers.global");
-    const loadedReviewers: Reviewer[] = globalJson
-      ? JSON.parse(globalJson)
-      : [];
-    setReviewers(loadedReviewers);
+    setReviewers(parseStoredReviewers(getAppState("reviewers.global")));
   }, []);
 
   useInput((_input, key) => {
@@ -87,7 +88,7 @@ export function Settings() {
           index: selectedReviewerIndex,
           step: "name",
           draftName: selectedReviewer.name,
-          originalHandle: selectedReviewer.handle,
+          draftHandle: selectedReviewer.handle,
         });
         setEditValue(selectedReviewer.name);
         setError("");
@@ -158,6 +159,34 @@ export function Settings() {
       return;
     }
 
+    setEditingReviewer({
+      ...editingReviewer,
+      step: "hotkey",
+      draftHandle: normalized,
+    });
+    setEditValue(reviewers[editingReviewer.index]?.hotkey || "");
+    setError("");
+  };
+
+  const handleReviewerHotkeySubmit = (value: string) => {
+    if (!editingReviewer) return;
+    const normalized = value.trim().toLowerCase();
+    const hotkey = normalized ? normalizeReviewerHotkey(normalized) : null;
+    if (normalized && !hotkey) {
+      setError("Hotkey must be a single letter a-z, or empty to clear.");
+      return;
+    }
+
+    const duplicate = reviewers.some(
+      (r, i) =>
+        i !== editingReviewer.index &&
+        normalizeReviewerHotkey(r.hotkey) === hotkey,
+    );
+    if (hotkey && duplicate) {
+      setError(`Hotkey '${hotkey}' is already assigned.`);
+      return;
+    }
+
     const next = [...reviewers];
     const prev = next[editingReviewer.index];
     if (!prev) {
@@ -167,12 +196,14 @@ export function Settings() {
     }
 
     next[editingReviewer.index] = {
-      name: editingReviewer.draftName.trim() || normalized,
-      handle: normalized,
+      name: editingReviewer.draftName.trim() || editingReviewer.draftHandle,
+      handle: editingReviewer.draftHandle,
+      hotkey,
     };
-    setReviewers(next);
-    setAppState("reviewers.global", JSON.stringify(next));
-    migrateRepoReviewerDefaults(prev.handle, normalized);
+    const normalizedReviewers = normalizeReviewers(next);
+    setReviewers(normalizedReviewers);
+    setAppState("reviewers.global", JSON.stringify(normalizedReviewers));
+    migrateRepoReviewerDefaults(prev.handle, editingReviewer.draftHandle);
     setEditingReviewer(null);
     setEditValue("");
     setError("");
@@ -239,6 +270,10 @@ export function Settings() {
           isSelected &&
           editingReviewer?.index === i &&
           editingReviewer.step === "handle";
+        const isEditingHotkey =
+          isSelected &&
+          editingReviewer?.index === i &&
+          editingReviewer.step === "hotkey";
 
         return (
           <Box key={reviewer.handle} paddingLeft={1} flexDirection="column">
@@ -250,6 +285,9 @@ export function Settings() {
               {!isEditingName && !isEditingHandle && (
                 <Text>
                   {reviewer.name} <Text dimColor>@{reviewer.handle}</Text>
+                  {reviewer.hotkey && (
+                    <Text dimColor> [{reviewer.hotkey}]</Text>
+                  )}
                 </Text>
               )}
             </Box>
@@ -275,6 +313,17 @@ export function Settings() {
                 />
               </Box>
             )}
+
+            {isEditingHotkey && (
+              <Box paddingLeft={3}>
+                <Text>Hotkey: </Text>
+                <InkTextInput
+                  value={editValue}
+                  onChange={setEditValue}
+                  onSubmit={handleReviewerHotkeySubmit}
+                />
+              </Box>
+            )}
           </Box>
         );
       })}
@@ -284,7 +333,9 @@ export function Settings() {
           <Text dimColor>
             {editingReviewer.step === "name"
               ? "Editing reviewer name (Enter to continue, Esc to cancel)"
-              : "Editing reviewer handle (Enter to save, Esc to cancel)"}
+              : editingReviewer.step === "handle"
+                ? "Editing reviewer handle (Enter to continue, Esc to cancel)"
+                : "Editing reviewer hotkey (a-z, blank clears, Enter to save, Esc to cancel)"}
           </Text>
         </Box>
       )}
