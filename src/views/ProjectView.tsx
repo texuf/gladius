@@ -18,6 +18,7 @@ import {
   setProjectLinearEnabled,
   touchProject,
 } from "../services/db.js";
+import { resolveProjectBackend } from "../services/projectBackend.js";
 import { destroySession } from "../services/terminalManager.js";
 import { processChord } from "../utils/keyboard.js";
 
@@ -39,6 +40,7 @@ export function ProjectView() {
   const prevFocusPaneRef = useRef(focusPane);
 
   const workspaceId = activeProject ? `project-${activeProject.id}` : "";
+  const backend = activeProject ? resolveProjectBackend(activeProject) : null;
   const projectRepos = useMemo(
     () => repos.filter((repo) => repo.project_id === activeProject?.id),
     [repos, activeProject?.id],
@@ -66,6 +68,10 @@ export function ProjectView() {
   const runRefresh = useCallback(() => {
     const projectId = activeProject?.id;
     if (!projectId) return;
+    if (activeProject.backend_kind === "ssh") {
+      setError("SSH project refresh is not wired yet.");
+      return;
+    }
     try {
       const result = refreshProjectRepos(projectId);
       const updatedRepos = getAllRepos();
@@ -81,7 +87,7 @@ export function ProjectView() {
     } catch (e: any) {
       setError(e.message || "Refresh failed");
     }
-  }, [activeProject?.id, setActiveProject, setRepos]);
+  }, [activeProject?.backend_kind, activeProject?.id, setActiveProject, setRepos]);
 
   const toggleLinear = () => {
     if (!activeProject) return;
@@ -156,6 +162,7 @@ export function ProjectView() {
   });
 
   if (!activeProject) return null;
+  if (!backend) return null;
 
   const titleFocused = focusPane === "notes";
 
@@ -174,36 +181,62 @@ export function ProjectView() {
           </Text>
           <Text dimColor>i: focus</Text>
         </Box>
-        <Text>{activeProject.path}</Text>
+        <Text>
+          {backend.kind === "ssh"
+            ? `${backend.target}:${backend.basePath}`
+            : activeProject.path}
+        </Text>
         <Text dimColor>
           {projectRepos.length} repo{projectRepos.length === 1 ? "" : "s"}
           {refreshStatus ? ` | ${refreshStatus}` : ""}
           {model ? ` | model: ${model}` : " | cl: Claude co: Codex"}
           {` | linear: ${linearEnabled ? "on" : "off"} (y toggle)`}
         </Text>
+        <Text dimColor>
+          backend: {backend.kind}
+          {backend.target ? ` | target: ${backend.target}` : ""}
+          {backend.kind === "ssh" ? ` | base: ${backend.basePath}` : ""}
+        </Text>
         {error && <Text color="red">{error}</Text>}
       </Box>
 
-      <TerminalPane
-        type="terminal"
-        label="Terminal"
-        focusKey="t"
-        layout="project"
-        workspaceId={workspaceId}
-        cwd={activeProject.path}
-        captureSessionIds={false}
-      />
+      {backend.kind === "local" ? (
+        <>
+          <TerminalPane
+            type="terminal"
+            label="Terminal"
+            focusKey="t"
+            layout="project"
+            workspaceId={workspaceId}
+            cwd={activeProject.path}
+            captureSessionIds={false}
+          />
 
-      <TerminalPane
-        type="console"
-        label="Console"
-        focusKey="c"
-        layout="project"
-        workspaceId={workspaceId}
-        cwd={activeProject.path}
-        model={model}
-        captureSessionIds={false}
-      />
+          <TerminalPane
+            type="console"
+            label="Console"
+            focusKey="c"
+            layout="project"
+            workspaceId={workspaceId}
+            cwd={activeProject.path}
+            model={model}
+            captureSessionIds={false}
+          />
+        </>
+      ) : (
+        <Box
+          flexDirection="column"
+          borderStyle="single"
+          borderColor="gray"
+          paddingX={1}
+        >
+          <Text bold>Remote Project</Text>
+          <Text dimColor>
+            SSH-backed project terminals and consoles are not wired yet in this
+            phase.
+          </Text>
+        </Box>
+      )}
     </Box>
   );
 }

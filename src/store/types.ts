@@ -1,7 +1,13 @@
+export type ProjectBackendKind = "local" | "ssh";
+
 export interface Project {
   id: string;
   name: string;
   path: string;
+  backend_kind: ProjectBackendKind;
+  backend_target: string | null;
+  backend_base_path: string;
+  backend_display_name: string | null;
   created_at: string;
   last_accessed_at: string;
 }
@@ -13,6 +19,10 @@ export interface Repo {
   project_id: string;
   project_name: string;
   project_path: string;
+  project_backend_kind: ProjectBackendKind;
+  project_backend_target: string | null;
+  project_backend_base_path: string;
+  project_backend_display_name: string | null;
   created_at: string;
   last_accessed_at: string;
 }

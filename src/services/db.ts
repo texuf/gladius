@@ -3,12 +3,19 @@ import { v4 as uuid } from "uuid";
 import { homedir } from "os";
 import { mkdirSync, existsSync, readdirSync } from "fs";
 import { dirname, join, resolve } from "path";
-import type { Project, Repo, Task, TaskEvent } from "../store/types.js";
+import type {
+  Project,
+  ProjectBackendKind,
+  Repo,
+  Task,
+  TaskEvent,
+} from "../store/types.js";
 
 const GLADIUS_DIR = join(homedir(), ".gladius");
 const DB_PATH = join(GLADIUS_DIR, "gladius.db");
 const CLEANUP_MIGRATION_KEY = "migration.cleanup_2026_02_27";
 const DEFAULT_LINEAR_TEAM = "";
+const DEFAULT_PROJECT_BACKEND_KIND: ProjectBackendKind = "local";
 
 let db: Database;
 
@@ -32,6 +39,10 @@ function initSchema() {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
       path TEXT NOT NULL UNIQUE,
+      backend_kind TEXT NOT NULL DEFAULT 'local',
+      backend_target TEXT,
+      backend_base_path TEXT NOT NULL,
+      backend_display_name TEXT,
       created_at TEXT NOT NULL,
       last_accessed_at TEXT NOT NULL
     );
@@ -103,6 +114,10 @@ function migrateSchema() {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
         path TEXT NOT NULL UNIQUE,
+        backend_kind TEXT NOT NULL DEFAULT 'local',
+        backend_target TEXT,
+        backend_base_path TEXT NOT NULL,
+        backend_display_name TEXT,
         created_at TEXT NOT NULL,
         last_accessed_at TEXT NOT NULL
       );
@@ -124,6 +139,20 @@ function migrateSchema() {
 
   if (!hasColumn("projects", "path")) {
     db.exec("ALTER TABLE projects ADD COLUMN path TEXT;");
+  }
+  if (!hasColumn("projects", "backend_kind")) {
+    db.exec(
+      `ALTER TABLE projects ADD COLUMN backend_kind TEXT NOT NULL DEFAULT '${DEFAULT_PROJECT_BACKEND_KIND}';`,
+    );
+  }
+  if (!hasColumn("projects", "backend_target")) {
+    db.exec("ALTER TABLE projects ADD COLUMN backend_target TEXT;");
+  }
+  if (!hasColumn("projects", "backend_base_path")) {
+    db.exec("ALTER TABLE projects ADD COLUMN backend_base_path TEXT;");
+  }
+  if (!hasColumn("projects", "backend_display_name")) {
+    db.exec("ALTER TABLE projects ADD COLUMN backend_display_name TEXT;");
   }
 
   const projectsMissingPath = db
@@ -175,6 +204,21 @@ function migrateSchema() {
   db.exec(
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_path ON projects(path);",
   );
+  db.exec(
+    `UPDATE projects
+       SET backend_kind = '${DEFAULT_PROJECT_BACKEND_KIND}'
+     WHERE backend_kind IS NULL OR TRIM(backend_kind) = '';`,
+  );
+  db.exec(
+    `UPDATE projects
+       SET backend_base_path = path
+     WHERE backend_base_path IS NULL OR TRIM(backend_base_path) = '';`,
+  );
+  db.exec(
+    `UPDATE projects
+       SET backend_display_name = name
+     WHERE backend_display_name IS NULL OR TRIM(backend_display_name) = '';`,
+  );
 
   if (!hasTable("tasks")) {
     db.exec(`
@@ -217,7 +261,11 @@ function migrateSchema() {
     .query("SELECT id, path FROM repos WHERE project_id IS NULL OR project_id = ''")
     .all() as Array<{ id: string; path: string }>;
   if (orphaned.length > 0) {
-    const defaultProject = resolveProjectByPath(join(homedir(), "default"), "default");
+    const defaultProject = resolveProjectByPath(join(homedir(), "default"), {
+      preferredName: "default",
+      backendKind: "local",
+      backendBasePath: join(homedir(), "default"),
+    });
 
     const updateRepoProject = db.query(
       "UPDATE repos SET project_id = ? WHERE id = ?",
@@ -352,18 +400,80 @@ function runOneTimeCleanupMigration(): void {
   );
 }
 
-function resolveProjectByPath(projectPath: string, preferredName?: string): Project {
-  const db = getDb();
-  const normalizedPath = normalizePath(projectPath);
+interface ProjectResolutionOptions {
+  preferredName?: string;
+  backendKind?: ProjectBackendKind;
+  backendTarget?: string | null;
+  backendBasePath?: string | null;
+  backendDisplayName?: string | null;
+}
 
-  const existing = db
-    .query("SELECT * FROM projects WHERE path = ?")
-    .get(normalizedPath) as Project | null;
+interface CreateProjectInput {
+  name: string;
+  path?: string;
+  backendKind?: ProjectBackendKind;
+  backendTarget?: string | null;
+  backendBasePath?: string | null;
+  backendDisplayName?: string | null;
+}
+
+function normalizeRemotePath(pathValue: string): string {
+  const trimmed = pathValue.trim();
+  if (!trimmed) return "/";
+  const normalized = trimmed.replace(/\/+$/, "");
+  return normalized || "/";
+}
+
+function normalizeProjectStoragePath(
+  pathValue: string,
+  backendKind: ProjectBackendKind,
+): string {
+  return backendKind === "ssh"
+    ? normalizeRemotePath(pathValue)
+    : normalizePath(pathValue);
+}
+
+function resolveProjectByPath(
+  projectPath: string,
+  options?: ProjectResolutionOptions,
+): Project {
+  const db = getDb();
+  const backendKind = options?.backendKind ?? DEFAULT_PROJECT_BACKEND_KIND;
+  const normalizedPath = normalizeProjectStoragePath(projectPath, backendKind);
+  const backendBasePath = normalizeProjectStoragePath(
+    options?.backendBasePath ?? projectPath,
+    backendKind,
+  );
+  const backendTarget =
+    backendKind === "ssh" ? options?.backendTarget?.trim() || null : null;
+  const backendDisplayName = options?.backendDisplayName?.trim() || null;
+
+  const existing =
+    backendKind === "ssh" && backendTarget
+      ? ((db
+          .query(
+            `SELECT id, name, path, backend_kind, backend_target, backend_base_path, backend_display_name,
+                    created_at, last_accessed_at
+               FROM projects
+              WHERE backend_kind = 'ssh' AND backend_target = ? AND backend_base_path = ?`,
+          )
+          .get(backendTarget, backendBasePath) as Project | null) ??
+        null)
+      : ((db
+          .query(
+            `SELECT id, name, path, backend_kind, backend_target, backend_base_path, backend_display_name,
+                    created_at, last_accessed_at
+               FROM projects
+              WHERE path = ?`,
+          )
+          .get(normalizedPath) as Project | null) ?? null);
   if (existing) {
     return existing;
   }
 
-  const rawName = (preferredName?.trim() || deriveProjectName(normalizedPath)).trim();
+  const rawName = (
+    options?.preferredName?.trim() || deriveProjectName(normalizedPath)
+  ).trim();
   const normalizedName = rawName || "default";
   let name = normalizedName;
   let index = 2;
@@ -381,16 +491,27 @@ function resolveProjectByPath(projectPath: string, preferredName?: string): Proj
     id: uuid(),
     name,
     path: normalizedPath,
+    backend_kind: backendKind,
+    backend_target: backendTarget,
+    backend_base_path: backendBasePath,
+    backend_display_name: backendDisplayName ?? name,
     created_at: now,
     last_accessed_at: now,
   };
 
   db.query(
-    "INSERT INTO projects (id, name, path, created_at, last_accessed_at) VALUES (?, ?, ?, ?, ?)",
+    `INSERT INTO projects (
+       id, name, path, backend_kind, backend_target, backend_base_path, backend_display_name,
+       created_at, last_accessed_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     project.id,
     project.name,
     project.path,
+    project.backend_kind,
+    project.backend_target,
+    project.backend_base_path,
+    project.backend_display_name,
     project.created_at,
     project.last_accessed_at,
   );
@@ -443,7 +564,10 @@ export function getAllProjects(): Project[] {
   const db = getDb();
   return db
     .query(
-      "SELECT id, name, path, created_at, last_accessed_at FROM projects ORDER BY last_accessed_at DESC, name ASC",
+      `SELECT id, name, path, backend_kind, backend_target, backend_base_path, backend_display_name,
+              created_at, last_accessed_at
+         FROM projects
+        ORDER BY last_accessed_at DESC, name ASC`,
     )
     .all() as Project[];
 }
@@ -453,20 +577,51 @@ export function getProjectById(id: string): Project | null {
   return (
     (db
       .query(
-        "SELECT id, name, path, created_at, last_accessed_at FROM projects WHERE id = ?",
+        `SELECT id, name, path, backend_kind, backend_target, backend_base_path, backend_display_name,
+                created_at, last_accessed_at
+           FROM projects
+          WHERE id = ?`,
       )
       .get(id) as Project) ?? null
   );
 }
 
-export function createProject(name: string, path?: string): Project {
-  const trimmed = name.trim();
+export function createProject(name: string, path?: string): Project;
+export function createProject(input: CreateProjectInput): Project;
+export function createProject(
+  nameOrInput: string | CreateProjectInput,
+  path?: string,
+): Project {
+  const input =
+    typeof nameOrInput === "string"
+      ? ({ name: nameOrInput, path } satisfies CreateProjectInput)
+      : nameOrInput;
+  const trimmed = input.name.trim();
   if (!trimmed) {
     throw new Error("Project name cannot be empty");
   }
 
-  const projectPath = normalizePath(path || join(homedir(), trimmed));
-  return resolveProjectByPath(projectPath, trimmed);
+  const backendKind = input.backendKind ?? DEFAULT_PROJECT_BACKEND_KIND;
+  const projectPath =
+    backendKind === "ssh"
+      ? input.backendBasePath?.trim() || input.path?.trim() || ""
+      : input.path || join(homedir(), trimmed);
+
+  if (!projectPath) {
+    throw new Error("Project path cannot be empty");
+  }
+  if (backendKind === "ssh" && !input.backendTarget?.trim()) {
+    throw new Error("SSH projects require a backend target");
+  }
+
+  return resolveProjectByPath(projectPath, {
+    preferredName: trimmed,
+    backendKind,
+    backendTarget: input.backendTarget,
+    backendBasePath:
+      backendKind === "ssh" ? input.backendBasePath ?? projectPath : projectPath,
+    backendDisplayName: input.backendDisplayName,
+  });
 }
 
 export function touchProject(id: string): void {
@@ -493,6 +648,9 @@ export function getAllRepos(): Repo[] {
   return db
     .query(
       `SELECT r.id, r.name, r.path, r.project_id, p.name AS project_name, p.path AS project_path,
+              p.backend_kind AS project_backend_kind, p.backend_target AS project_backend_target,
+              p.backend_base_path AS project_backend_base_path,
+              p.backend_display_name AS project_backend_display_name,
               r.created_at, r.last_accessed_at
        FROM repos r
        JOIN projects p ON r.project_id = p.id
@@ -526,7 +684,11 @@ export function addRepo(path: string, projectNameOrPath?: string): Repo {
         : normalizePath(join(homedir(), projectHint));
   const project = resolveProjectByPath(
     projectPath,
-    projectHint || deriveProjectName(projectPath),
+    {
+      preferredName: projectHint || deriveProjectName(projectPath),
+      backendKind: "local",
+      backendBasePath: projectPath,
+    },
   );
   const now = new Date().toISOString();
 
@@ -537,6 +699,10 @@ export function addRepo(path: string, projectNameOrPath?: string): Repo {
     project_id: project.id,
     project_name: project.name,
     project_path: project.path,
+    project_backend_kind: project.backend_kind,
+    project_backend_target: project.backend_target,
+    project_backend_base_path: project.backend_base_path,
+    project_backend_display_name: project.backend_display_name,
     created_at: now,
     last_accessed_at: now,
   };
@@ -578,6 +744,9 @@ export function getRepoById(id: string): Repo | null {
     (db
       .query(
         `SELECT r.id, r.name, r.path, r.project_id, p.name AS project_name, p.path AS project_path,
+                p.backend_kind AS project_backend_kind, p.backend_target AS project_backend_target,
+                p.backend_base_path AS project_backend_base_path,
+                p.backend_display_name AS project_backend_display_name,
                 r.created_at, r.last_accessed_at
          FROM repos r
          JOIN projects p ON r.project_id = p.id
@@ -622,12 +791,17 @@ export function refreshProjectRepos(projectId: string): {
   if (!project) {
     throw new Error("Project not found");
   }
-  if (!existsSync(project.path)) {
-    throw new Error(`Project path does not exist: ${project.path}`);
+  if (project.backend_kind === "ssh") {
+    throw new Error("SSH project refresh is not wired yet");
+  }
+
+  const discoveryRoot = project.backend_base_path || project.path;
+  if (!existsSync(discoveryRoot)) {
+    throw new Error(`Project path does not exist: ${discoveryRoot}`);
   }
 
   const now = new Date().toISOString();
-  const discoveredPaths = discoverGitRepos(project.path);
+  const discoveredPaths = discoverGitRepos(discoveryRoot);
   const getRepoByPath = db.query(
     "SELECT id, project_id FROM repos WHERE path = ?",
   );
