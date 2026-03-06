@@ -6,25 +6,58 @@ function encodeClaudeProjectPath(worktreePath: string): string {
   return worktreePath.replaceAll("/", "-").replaceAll(".", "-");
 }
 
+export interface ClaudeSessionInfo {
+  sessionId: string;
+  filePath: string;
+  mtimeMs: number;
+}
+
+export function getClaudeProjectDir(worktreePath: string): string | null {
+  const encodedCandidates = [
+    encodeClaudeProjectPath(worktreePath),
+    worktreePath.replaceAll("/", "-"),
+  ];
+  const projectsRoot = join(homedir(), ".claude", "projects");
+
+  return (
+    encodedCandidates
+      .map((encoded) => join(projectsRoot, encoded))
+      .find((candidate) => existsSync(candidate)) ?? null
+  );
+}
+
 /**
  * Find the most recently modified .jsonl file in a directory.
- * Returns the session ID (filename without extension) or null.
+ * Returns the session info or null.
  */
-function findMostRecentSession(dir: string): string | null {
+function findMostRecentSession(dir: string): ClaudeSessionInfo | null {
   try {
     if (!existsSync(dir)) return null;
-    let newest: { name: string; mtime: number } | null = null;
+    let newest: ClaudeSessionInfo | null = null;
     for (const f of readdirSync(dir)) {
       if (!f.endsWith(".jsonl")) continue;
-      const mtime = statSync(join(dir, f)).mtimeMs;
-      if (!newest || mtime > newest.mtime) {
-        newest = { name: f, mtime };
+      const filePath = join(dir, f);
+      const mtimeMs = statSync(filePath).mtimeMs;
+      if (!newest || mtimeMs > newest.mtimeMs) {
+        newest = {
+          sessionId: f.replace(/\.jsonl$/, ""),
+          filePath,
+          mtimeMs,
+        };
       }
     }
-    return newest ? newest.name.replace(/\.jsonl$/, "") : null;
+    return newest;
   } catch {
     return null;
   }
+}
+
+export function getLatestClaudeSession(
+  worktreePath: string,
+): ClaudeSessionInfo | null {
+  const claudeProjectDir = getClaudeProjectDir(worktreePath);
+  if (!claudeProjectDir) return null;
+  return findMostRecentSession(claudeProjectDir);
 }
 
 /**
@@ -43,9 +76,7 @@ export function watchForClaudeSessionId(
   ];
   const projectsRoot = join(homedir(), ".claude", "projects");
   const claudeProjectDir =
-    encodedCandidates
-      .map((encoded) => join(projectsRoot, encoded))
-      .find((candidate) => existsSync(candidate)) ??
+    getClaudeProjectDir(worktreePath) ??
     join(projectsRoot, encodedCandidates[0]);
 
   // If backfilling, immediately return the most recent existing session
@@ -53,7 +84,7 @@ export function watchForClaudeSessionId(
     const existing = findMostRecentSession(claudeProjectDir);
     if (existing) {
       // Use setTimeout to allow cleanup ref to be set before callback fires
-      setTimeout(() => callback(existing), 0);
+      setTimeout(() => callback(existing.sessionId), 0);
       return () => {};
     }
   }

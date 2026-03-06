@@ -2,6 +2,10 @@ import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import type { Task } from "../store/types.js";
+import {
+  getClaudeProjectDir,
+  getLatestClaudeSession,
+} from "./sessionCapture.js";
 
 export type PromptSource = "claude" | "codex";
 
@@ -20,11 +24,6 @@ export interface TaskConversationMessage {
 
 const filePromptCache = new Map<string, { mtimeMs: number; prompt: TaskPrompt | null }>();
 const codexSessionPathCache = new Map<string, string | null>();
-
-function encodeClaudeProjectPath(worktreePath: string): string {
-  // Claude project folder names replace path separators and dot-prefixed segments.
-  return worktreePath.replaceAll("/", "-").replaceAll(".", "-");
-}
 
 function safeParseJson(line: string): any | null {
   try {
@@ -313,50 +312,28 @@ function parsePromptFileCached(
   }
 }
 
-function findLatestClaudeSessionFile(worktreePath: string): string | null {
-  const encodedCandidates = [
-    encodeClaudeProjectPath(worktreePath),
-    worktreePath.replaceAll("/", "-"),
-  ];
-
-  const projectDir = encodedCandidates
-    .map((encodedPath) => join(homedir(), ".claude", "projects", encodedPath))
-    .find((dir) => existsSync(dir));
-  if (!projectDir) return null;
-
-  let latestFile: string | null = null;
-  let latestMtime = 0;
-
-  for (const fileName of readdirSync(projectDir)) {
-    if (!fileName.endsWith(".jsonl")) continue;
-    const filePath = join(projectDir, fileName);
-    try {
-      const mtime = statSync(filePath).mtimeMs;
-      if (mtime >= latestMtime) {
-        latestMtime = mtime;
-        latestFile = filePath;
-      }
-    } catch {}
-  }
-  return latestFile;
-}
-
 function resolveClaudeSessionFile(task: Task): string | null {
   if (!task.worktree_path) return null;
-  const encodedCandidates = [
-    encodeClaudeProjectPath(task.worktree_path),
-    task.worktree_path.replaceAll("/", "-"),
-  ];
-  const projectDir = encodedCandidates
-    .map((encodedPath) => join(homedir(), ".claude", "projects", encodedPath))
-    .find((dir) => existsSync(dir));
+  const projectDir = getClaudeProjectDir(task.worktree_path);
   if (!projectDir) return null;
+
+  const latest = getLatestClaudeSession(task.worktree_path);
 
   if (task.claude_session_id) {
     const directPath = join(projectDir, `${task.claude_session_id}.jsonl`);
-    if (existsSync(directPath)) return directPath;
+    if (existsSync(directPath)) {
+      try {
+        const directMtime = statSync(directPath).mtimeMs;
+        if (!latest || directMtime > latest.mtimeMs) {
+          return directPath;
+        }
+      } catch {
+        return directPath;
+      }
+    }
   }
-  return findLatestClaudeSessionFile(task.worktree_path);
+
+  return latest?.filePath ?? null;
 }
 
 function resolveCodexSessionFile(task: Task): string | null {

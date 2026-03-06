@@ -4,6 +4,7 @@ import { useStore } from "../store/index.js";
 import { EmbeddedTerminal } from "./EmbeddedTerminal.js";
 import {
   buildLlmCommand,
+  getLatestClaudeSession,
   watchForClaudeSessionId,
   watchForCodexSessionId,
 } from "../services/sessionCapture.js";
@@ -308,6 +309,38 @@ export function TerminalPane({
       type,
     ],
   );
+
+  useEffect(() => {
+    if (
+      type !== "console" ||
+      !isTaskScoped ||
+      !activeTask ||
+      activeTask.model !== "claude" ||
+      !activeTask.worktree_path
+    ) {
+      return;
+    }
+
+    const latest = getLatestClaudeSession(activeTask.worktree_path);
+    if (!latest || latest.sessionId === activeTask.claude_session_id) {
+      return;
+    }
+
+    const updates = { claude_session_id: latest.sessionId };
+    updateTask(activeTask.id, updates);
+    setActiveTask({ ...activeTask, ...updates });
+    setTasks(
+      useStore
+        .getState()
+        .tasks.map((t) => (t.id === activeTask.id ? { ...t, ...updates } : t)),
+    );
+  }, [
+    activeTask,
+    isTaskScoped,
+    setActiveTask,
+    setTasks,
+    type,
+  ]);
 
   return (
     <Box
