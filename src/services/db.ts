@@ -760,6 +760,45 @@ export function getRepoById(id: string): Repo | null {
   );
 }
 
+export function getRepoForPath(path: string): Repo | null {
+  const trimmedPath = path.trim();
+  if (!trimmedPath) return null;
+
+  const db = getDb();
+  const byRepoPath = db
+    .query(
+      `SELECT r.id, r.name, r.path, r.project_id, p.name AS project_name, p.path AS project_path,
+              p.backend_kind AS project_backend_kind, p.backend_target AS project_backend_target,
+              p.backend_base_path AS project_backend_base_path,
+              p.backend_display_name AS project_backend_display_name,
+              r.created_at, r.last_accessed_at
+       FROM repos r
+       JOIN projects p ON r.project_id = p.id
+       WHERE r.path = ?
+       LIMIT 1`,
+    )
+    .get(trimmedPath) as Repo | null;
+  if (byRepoPath) return byRepoPath;
+
+  return (
+    (db
+      .query(
+        `SELECT r.id, r.name, r.path, r.project_id, p.name AS project_name, p.path AS project_path,
+                p.backend_kind AS project_backend_kind, p.backend_target AS project_backend_target,
+                p.backend_base_path AS project_backend_base_path,
+                p.backend_display_name AS project_backend_display_name,
+                r.created_at, r.last_accessed_at
+         FROM tasks t
+         JOIN repos r ON t.repo_id = r.id
+         JOIN projects p ON r.project_id = p.id
+         WHERE t.worktree_path = ?
+         ORDER BY t.last_accessed_at DESC
+         LIMIT 1`,
+      )
+      .get(trimmedPath) as Repo) ?? null
+  );
+}
+
 export function deleteRepo(id: string): void {
   const db = getDb();
 

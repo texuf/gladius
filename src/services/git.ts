@@ -1,4 +1,10 @@
 import { $ } from "bun";
+import { getRepoForPath } from "./db.js";
+import {
+  quoteShell,
+  resolveProjectBackend,
+  runBackendCommand,
+} from "./projectBackend.js";
 import type {
   GitStatus,
   PrStatus,
@@ -25,6 +31,47 @@ const prStatusInFlightByRemote = new Map<
 type PrCandidate = PrStatus & {
   updatedAtMs: number;
 };
+
+function getBackendForPath(repoPath: string) {
+  const repo = getRepoForPath(repoPath);
+  if (!repo) return null;
+  return resolveProjectBackend({
+    backend_kind: repo.project_backend_kind,
+    backend_target: repo.project_backend_target,
+    backend_base_path: repo.project_backend_base_path,
+    backend_display_name: repo.project_backend_display_name,
+    path: repo.project_path,
+    name: repo.project_name,
+  });
+}
+
+async function runGit(repoPath: string, args: string[]): Promise<string> {
+  const backend = getBackendForPath(repoPath);
+  if (backend?.kind === "ssh") {
+    const command = `git ${args.map((arg) => quoteShell(arg)).join(" ")}`;
+    const result = runBackendCommand(backend, command);
+    if (result.exitCode !== 0) {
+      throw new Error((result.stderr || result.stdout || "git command failed").trim());
+    }
+    return result.stdout;
+  }
+
+  return await $`git ${args}`.text();
+}
+
+async function runGh(args: string[]): Promise<string> {
+  return await $`gh ${args}`.text();
+}
+
+async function getRemoteUrl(repoPath: string): Promise<string> {
+  return (await runGit(repoPath, ["-C", repoPath, "remote", "get-url", "origin"])).trim();
+}
+
+async function getRepoSlug(repoPath: string): Promise<string | null> {
+  const parsed = parseOwnerRepo(await getRemoteUrl(repoPath));
+  if (!parsed) return null;
+  return `${parsed.owner}/${parsed.repo}`;
+}
 
 function getPrReadiness(pr: {
   state: "open" | "closed" | "merged";
@@ -77,7 +124,14 @@ export async function getGitStatus(
   try {
     // Resolve upstream tracking branch (if configured for this branch)
     upstream = (
-      await $`git -C ${repoPath} rev-parse --abbrev-ref --symbolic-full-name ${branch}@{upstream}`.text()
+      await runGit(repoPath, [
+        "-C",
+        repoPath,
+        "rev-parse",
+        "--abbrev-ref",
+        "--symbolic-full-name",
+        `${branch}@{upstream}`,
+      ])
     ).trim();
   } catch {
     // No upstream configured
@@ -87,8 +141,14 @@ export async function getGitStatus(
     _tracksMain = upstreamBranch === "main" || upstreamBranch === "master";
 
     try {
-      const revList =
-        await $`git -C ${repoPath} rev-list --left-right --count ${branch}...${upstream} 2>/dev/null`.text();
+      const revList = await runGit(repoPath, [
+        "-C",
+        repoPath,
+        "rev-list",
+        "--left-right",
+        "--count",
+        `${branch}...${upstream}`,
+      ]);
       const parts = revList.trim().split(/\s+/);
       if (parts.length === 2) {
         hasTrackingBranch = true;
@@ -103,8 +163,13 @@ export async function getGitStatus(
   try {
     // Behind main
     const main = await getMainBranch(repoPath);
-    const behindMainResult =
-      await $`git -C ${repoPath} rev-list --count HEAD..origin/${main} 2>/dev/null`.text();
+    const behindMainResult = await runGit(repoPath, [
+      "-C",
+      repoPath,
+      "rev-list",
+      "--count",
+      `HEAD..origin/${main}`,
+    ]);
     behindMain = parseInt(behindMainResult.trim(), 10) || 0;
   } catch {
     // No origin/<main>
@@ -112,7 +177,12 @@ export async function getGitStatus(
 
   try {
     // Changed files
-    const status = await $`git -C ${repoPath} status --porcelain`.text();
+    const status = await runGit(repoPath, [
+      "-C",
+      repoPath,
+      "status",
+      "--porcelain",
+    ]);
     changedFiles = status
       .trim()
       .split("\n")
@@ -160,9 +230,7 @@ async function getPrStatus(
   forceRefresh = false,
 ): Promise<PrStatus | null> {
   try {
-    const remoteUrl = (
-      await $`git -C ${repoPath} remote get-url origin`.text()
-    ).trim();
+    const remoteUrl = await getRemoteUrl(repoPath);
     const parsed = parseOwnerRepo(remoteUrl);
     if (!parsed) return null;
 
@@ -445,8 +513,13 @@ function isConflicting(mergeable: string): boolean {
 
 export async function getCurrentBranch(repoPath: string): Promise<string> {
   try {
-    const result =
-      await $`git -C ${repoPath} rev-parse --abbrev-ref HEAD`.text();
+    const result = await runGit(repoPath, [
+      "-C",
+      repoPath,
+      "rev-parse",
+      "--abbrev-ref",
+      "HEAD",
+    ]);
     return result.trim();
   } catch {
     return "unknown";
@@ -484,7 +557,9 @@ export function formatGitStatus(status: GitStatus): string {
 }
 
 export async function fetchLatestMain(repoPath: string): Promise<void> {
-  await $`git -C ${repoPath} fetch --prune origin`.quiet().nothrow();
+  try {
+    await runGit(repoPath, ["-C", repoPath, "fetch", "--prune", "origin"]);
+  } catch {}
 }
 
 /**
@@ -531,15 +606,21 @@ export async function getPrComments(
 ): Promise<ReviewThread[]> {
   try {
     const branchName = branch || (await getCurrentBranch(repoPath));
-    const remoteUrl = (
-      await $`git -C ${repoPath} remote get-url origin`.text()
-    ).trim();
+    const remoteUrl = await getRemoteUrl(repoPath);
     const parsed = parseOwnerRepo(remoteUrl);
     if (!parsed) return [];
+    const repoSlug = `${parsed.owner}/${parsed.repo}`;
 
     // Get PR number first
-    const prJson =
-      await $`gh pr view ${branchName} --repo ${remoteUrl} --json number`.text();
+    const prJson = await runGh([
+      "pr",
+      "view",
+      branchName,
+      "--repo",
+      repoSlug,
+      "--json",
+      "number",
+    ]);
     const { number: prNumber } = JSON.parse(prJson);
 
     const query = `query {
@@ -565,7 +646,7 @@ export async function getPrComments(
       }
     }`;
 
-    const gql = await $`gh api graphql -f query=${query}`.text();
+    const gql = await runGh(["api", "graphql", "-f", `query=${query}`]);
     const data = JSON.parse(gql);
     const threads =
       data?.data?.repository?.pullRequest?.reviewThreads?.nodes || [];
@@ -593,7 +674,12 @@ export async function getPrComments(
  */
 export async function resolveThread(threadId: string): Promise<boolean> {
   try {
-    await $`gh api graphql -f query=${'mutation { resolveReviewThread(input: { threadId: "' + threadId + '" }) { thread { id isResolved } } }'}`.text();
+    await runGh([
+      "api",
+      "graphql",
+      "-f",
+      `query=mutation { resolveReviewThread(input: { threadId: "${threadId}" }) { thread { id isResolved } } }`,
+    ]);
     return true;
   } catch {
     return false;
@@ -796,28 +882,36 @@ export async function getCiFailures(
 ): Promise<CiCheckFailure[]> {
   try {
     const branchName = branch || (await getCurrentBranch(repoPath));
-    const remoteUrl = (
-      await $`git -C ${repoPath} remote get-url origin`.text()
-    ).trim();
+    const remoteUrl = await getRemoteUrl(repoPath);
     const parsed = parseOwnerRepo(remoteUrl);
     if (!parsed) return [];
+    const repoSlug = `${parsed.owner}/${parsed.repo}`;
 
     // Get head SHA from PR
-    const prJson =
-      await $`gh pr view ${branchName} --repo ${remoteUrl} --json headRefOid`.text();
+    const prJson = await runGh([
+      "pr",
+      "view",
+      branchName,
+      "--repo",
+      repoSlug,
+      "--json",
+      "headRefOid",
+    ]);
     const { headRefOid: sha } = JSON.parse(prJson);
 
     // Get failed workflow runs for this commit
     const runsEndpoint = `repos/${parsed.owner}/${parsed.repo}/actions/runs?head_sha=${sha}&status=failure`;
-    const runsJson = await $`gh api ${runsEndpoint}`.text();
+    const runsJson = await runGh(["api", runsEndpoint]);
     const { workflow_runs: runs } = JSON.parse(runsJson);
     if (!runs || runs.length === 0) return [];
 
     // Get failed jobs across all failed runs in parallel
     const jobResults = await Promise.all(
       (runs as any[]).map(async (run: any) => {
-        const jobsJson =
-          await $`gh api repos/${parsed.owner}/${parsed.repo}/actions/runs/${run.id}/jobs`.text();
+        const jobsJson = await runGh([
+          "api",
+          `repos/${parsed.owner}/${parsed.repo}/actions/runs/${run.id}/jobs`,
+        ]);
         const { jobs } = JSON.parse(jobsJson);
         return (jobs || [])
           .filter((j: any) => j.conclusion === "failure")
@@ -839,8 +933,10 @@ export async function getCiFailures(
 
         if (failedStep) {
           try {
-            const rawLog =
-              await $`gh api repos/${parsed.owner}/${parsed.repo}/actions/jobs/${job.id}/logs`.text();
+            const rawLog = await runGh([
+              "api",
+              `repos/${parsed.owner}/${parsed.repo}/actions/jobs/${job.id}/logs`,
+            ]);
             log = extractFailedStepLog(rawLog, failedStep.name, failedStep);
           } catch {}
         }
@@ -865,8 +961,12 @@ export async function getCiFailures(
  */
 export async function getMainBranch(repoPath: string): Promise<string> {
   try {
-    const ref =
-      await $`git -C ${repoPath} symbolic-ref refs/remotes/origin/HEAD`.text();
+    const ref = await runGit(repoPath, [
+      "-C",
+      repoPath,
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+    ]);
     // refs/remotes/origin/main → main
     return ref.trim().replace("refs/remotes/origin/", "");
   } catch {
@@ -884,7 +984,13 @@ export async function getCommitLog(
   const main = mainBranch || (await getMainBranch(repoPath));
   try {
     return (
-      await $`git -C ${repoPath} log origin/${main}..HEAD --pretty=format:%s%n%b`.text()
+      await runGit(repoPath, [
+        "-C",
+        repoPath,
+        "log",
+        `origin/${main}..HEAD`,
+        "--pretty=format:%s%n%b",
+      ])
     ).trim();
   } catch {
     return "";
@@ -901,7 +1007,13 @@ export async function getDiffStat(
   const main = mainBranch || (await getMainBranch(repoPath));
   try {
     return (
-      await $`git -C ${repoPath} diff --stat origin/${main}..HEAD`.text()
+      await runGit(repoPath, [
+        "-C",
+        repoPath,
+        "diff",
+        "--stat",
+        `origin/${main}..HEAD`,
+      ])
     ).trim();
   } catch {
     return "";
@@ -915,8 +1027,8 @@ export async function stageAndCommit(
   repoPath: string,
   message: string,
 ): Promise<void> {
-  await $`git -C ${repoPath} add .`.text();
-  await $`git -C ${repoPath} commit -m ${message}`.text();
+  await runGit(repoPath, ["-C", repoPath, "add", "."]);
+  await runGit(repoPath, ["-C", repoPath, "commit", "-m", message]);
 }
 
 /**
@@ -926,7 +1038,14 @@ export async function pushBranch(
   repoPath: string,
   branchName: string,
 ): Promise<void> {
-  await $`git -C ${repoPath} push -u origin ${branchName}`.text();
+  await runGit(repoPath, [
+    "-C",
+    repoPath,
+    "push",
+    "-u",
+    "origin",
+    branchName,
+  ]);
 }
 
 /**
@@ -938,9 +1057,12 @@ export async function createPullRequest(
   body: string,
   reviewers: string[],
 ): Promise<{ number: number; url: string }> {
-  const remoteUrl = (
-    await $`git -C ${repoPath} remote get-url origin`.text()
-  ).trim();
+  const repoSlug = await getRepoSlug(repoPath);
+  if (!repoSlug) {
+    throw new Error("Could not determine repo slug from origin remote.");
+  }
+  const branchName = await getCurrentBranch(repoPath);
+  const baseBranch = await getMainBranch(repoPath);
   // Build reviewer args: ["--reviewer", "user1", "--reviewer", "user2"]
   const reviewerArgs: string[] = [];
   for (const r of reviewers) {
@@ -954,10 +1076,14 @@ export async function createPullRequest(
     "--body",
     body,
     "--repo",
-    remoteUrl,
+    repoSlug,
+    "--head",
+    branchName,
+    "--base",
+    baseBranch,
     ...reviewerArgs,
   ];
-  const result = await $`gh ${allArgs}`.cwd(repoPath).text();
+  const result = await runGh(allArgs);
   // gh pr create outputs the PR URL on the last line
   const url = result.trim().split("\n").pop()!.trim();
   const numMatch = url.match(/\/pull\/(\d+)/);
@@ -985,9 +1111,7 @@ export async function getCommitsSince(
     if (author) {
       args.push(`--author=${author}`);
     }
-    return (
-      await $`git ${args}`.text()
-    ).trim();
+    return (await runGit(repoPath, args)).trim();
   } catch {
     return "";
   }
@@ -1004,7 +1128,14 @@ export async function getCommitsSinceOnBranch(
 ): Promise<string> {
   try {
     return (
-      await $`git -C ${repoPath} log origin/${branch} --since=${sinceISO} --pretty=format:%h %s`.text()
+      await runGit(repoPath, [
+        "-C",
+        repoPath,
+        "log",
+        `origin/${branch}`,
+        `--since=${sinceISO}`,
+        "--pretty=format:%h %s",
+      ])
     ).trim();
   } catch {
     return "";
@@ -1037,14 +1168,13 @@ export async function getMergedPrsSince(
   options?: { author?: string },
 ): Promise<MergedPr[]> {
   try {
-    const remoteUrl = (
-      await $`git -C ${repoPath} remote get-url origin`.text()
-    ).trim();
+    const repoSlug = await getRepoSlug(repoPath);
+    if (!repoSlug) return [];
     const args = [
       "pr",
       "list",
       "--repo",
-      remoteUrl,
+      repoSlug,
       "--state",
       "merged",
       "--search",
@@ -1059,7 +1189,7 @@ export async function getMergedPrsSince(
       args.push("--author", author);
     }
 
-    const raw = await $`gh ${args}`.text();
+    const raw = await runGh(args);
     const prs = JSON.parse(raw);
     if (!Array.isArray(prs)) return [];
     const sinceMs = Date.parse(sinceISO);
@@ -1090,14 +1220,13 @@ export async function getPrsCreatedSince(
   options?: { author?: string },
 ): Promise<OpenedPr[]> {
   try {
-    const remoteUrl = (
-      await $`git -C ${repoPath} remote get-url origin`.text()
-    ).trim();
+    const repoSlug = await getRepoSlug(repoPath);
+    if (!repoSlug) return [];
     const args = [
       "pr",
       "list",
       "--repo",
-      remoteUrl,
+      repoSlug,
       "--state",
       "all",
       "--search",
@@ -1112,7 +1241,7 @@ export async function getPrsCreatedSince(
       args.push("--author", author);
     }
 
-    const raw = await $`gh ${args}`.text();
+    const raw = await runGh(args);
     const prs = JSON.parse(raw);
     if (!Array.isArray(prs)) return [];
     const sinceMs = Date.parse(sinceISO);

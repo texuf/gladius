@@ -139,7 +139,6 @@ export function TaskView() {
   const prInFlightRef = useRef(false);
 
   const pollGit = () => {
-    if (activeRepo?.project_backend_kind === "ssh") return Promise.resolve();
     if (!activeTask?.worktree_path) return Promise.resolve();
     return getGitStatus(activeTask.worktree_path).then((status) => {
       const mergedStatus = {
@@ -157,7 +156,6 @@ export function TaskView() {
     });
   };
   const pollPr = (forceRefresh = false) => {
-    if (activeRepo?.project_backend_kind === "ssh") return Promise.resolve();
     if (!activeTask?.worktree_path) return Promise.resolve();
     if (prInFlightRef.current && !forceRefresh) return Promise.resolve();
     prInFlightRef.current = true;
