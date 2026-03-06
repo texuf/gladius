@@ -42,16 +42,20 @@ function getGitWorkStatus(gitStatus: GitStatus | null): GitWorkStatus {
 }
 
 function inferLlmWorkingFromPane(content: string): boolean {
-  const recent = content
+  const recentLines = content
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
-    .slice(-4)
-    .join(" ")
-    .toLowerCase();
+    .slice(-20);
+  const recent = recentLines.join(" ").toLowerCase();
 
   if (!recent) return false;
   return (
+    recent.includes("esc to interrupt") ||
+    recentLines.some((line) => {
+      const normalized = line.toLowerCase();
+      return normalized.startsWith("✻ ") && !normalized.startsWith("✻ cooked for");
+    }) ||
     recent.includes("running…") ||
     recent.includes("running...") ||
     recent.includes("thinking") ||

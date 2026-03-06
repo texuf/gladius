@@ -122,11 +122,18 @@ export function TaskView() {
 
   // Track when focusPane transitions to "none" (covers both useInput and raw stdin onEsc)
   useEffect(() => {
+    if (
+      activeTask &&
+      prevFocusPaneRef.current === "console" &&
+      focusPane === "none"
+    ) {
+      void refreshTaskStatus(activeTask);
+    }
     if (prevFocusPaneRef.current !== "none" && focusPane === "none") {
       lastUnfocusRef.current = Date.now();
     }
     prevFocusPaneRef.current = focusPane;
-  }, [focusPane]);
+  }, [activeTask, focusPane]);
 
   // Poll git status (fast) and PR status (slower, separate)
   const prInFlightRef = useRef(false);
