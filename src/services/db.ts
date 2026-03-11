@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { v4 as uuid } from "uuid";
 import { homedir } from "os";
 import { mkdirSync, existsSync, readdirSync } from "fs";
-import { dirname, join, resolve } from "path";
+import { basename, dirname, join, posix as posixPath, resolve } from "path";
 import type {
   Project,
   ProjectBackendKind,
@@ -865,7 +865,10 @@ export function refreshProjectRepos(projectId: string): {
       | { id: string; project_id: string }
       | null;
     if (!existing) {
-      const name = repoPath.replace(homedir(), "~").replace(/^~\//, "");
+      const name =
+        project.backend_kind === "ssh"
+          ? posixPath.basename(repoPath)
+          : basename(repoPath);
       insertRepo.run(uuid(), name, repoPath, projectId, now, now);
       added += 1;
       continue;
@@ -927,6 +930,7 @@ function discoverGitRepos(projectPath: string): string[] {
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
       if (entry.name === ".git" || entry.name === "node_modules") continue;
+      if (current.depth === 0 && entry.name.startsWith(".")) continue;
       const child = join(current.dir, entry.name);
       stack.push({ dir: child, depth: current.depth + 1 });
     }

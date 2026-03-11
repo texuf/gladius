@@ -278,6 +278,8 @@ export function discoverRemoteGitRepos(
     }
     const repoRelativePath = relativeGitPath.replace(/\/\.git$/, "");
     if (!repoRelativePath) continue;
+    const rootSegment = repoRelativePath.split("/")[0];
+    if (rootSegment.startsWith(".")) continue;
     repos.add(posixPath.join(backend.basePath, repoRelativePath));
   }
 
