@@ -82,7 +82,7 @@ function copyIgnoredEnvFiles(repo: RepoBackendContext, worktreePath: string): vo
     `    cp "$rel" ${quoteShell(worktreePath)}/"$rel"`,
     "  fi",
     "done",
-  ].join(" ");
+  ].join("\n");
   const result = runBackendCommand(backend, command, { cwd: repo.path });
   requireSuccess(
     result.stderr,
