@@ -249,12 +249,12 @@ export async function computeAllTaskStatuses(): Promise<
  */
 export async function refreshAllTaskStatuses(options?: {
   forcePrRefresh?: boolean;
+  includeRemote?: boolean;
 }): Promise<Record<string, TaskStatusColor>> {
   const tasks = getAllActiveTasks();
   const repoMap = getRepoMap();
   const state = useStore.getState();
-  const skipRemotePoll =
-    state.view === "projects" || state.view === "projectView";
+  const skipRemotePoll = options?.includeRemote !== true;
   const reachabilityByProject = skipRemotePoll
     ? {}
     : getReachabilityForRepos(repoMap.values());

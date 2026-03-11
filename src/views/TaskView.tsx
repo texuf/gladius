@@ -70,6 +70,7 @@ export function TaskView() {
   const [fetching, setFetching] = useState(false);
   const [busyLabel, setBusyLabel] = useState("Fetching");
   const [actionError, setActionError] = useState("");
+  const shouldAutoPoll = activeRepo?.project_backend_kind !== "ssh";
 
   const markConsoleInteracted = (taskId: string) => {
     useStore.getState().markConsoleInteracted(taskId);
@@ -180,6 +181,7 @@ export function TaskView() {
   };
 
   const startPolling = () => {
+    if (!shouldAutoPoll) return;
     if (gitIntervalRef.current) clearInterval(gitIntervalRef.current);
     if (prIntervalRef.current) clearInterval(prIntervalRef.current);
     pollGit();
@@ -189,13 +191,13 @@ export function TaskView() {
   };
 
   useEffect(() => {
-    if (!activeTask?.worktree_path) return;
+    if (!activeTask?.worktree_path || !shouldAutoPoll) return;
     startPolling();
     return () => {
       if (gitIntervalRef.current) clearInterval(gitIntervalRef.current);
       if (prIntervalRef.current) clearInterval(prIntervalRef.current);
     };
-  }, [activeRepo?.project_backend_kind, activeTask?.id]);
+  }, [activeTask?.id, shouldAutoPoll]);
 
   // When opening a task, jump directly to console if an LLM session already exists.
   useEffect(() => {
@@ -225,10 +227,10 @@ export function TaskView() {
         clearInterval(prIntervalRef.current);
         prIntervalRef.current = null;
       }
-    } else if (activeTask?.worktree_path) {
+    } else if (activeTask?.worktree_path && shouldAutoPoll) {
       startPolling();
     }
-  }, [copyMode]);
+  }, [copyMode, shouldAutoPoll]);
 
   const handleOpenLinearIssue = () => {
     const issueId = activeTask?.linear_issue_id?.trim();
@@ -566,9 +568,15 @@ export function TaskView() {
             await fetchLatestMain(worktreePath);
           }
         })
-        .then(() => refreshAllTaskStatuses({ forcePrRefresh: true }))
+        .then(() =>
+          refreshAllTaskStatuses({
+            forcePrRefresh: true,
+            includeRemote: true,
+          }),
+        )
         .finally(() => {
           setFetching(false);
+          if (!shouldAutoPoll) return;
           gitIntervalRef.current = setInterval(pollGit, 5000);
           // Only restart PR polling if checks are still pending
           if (taskId) {
