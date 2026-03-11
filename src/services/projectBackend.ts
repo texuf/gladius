@@ -130,7 +130,7 @@ export function openBackendShellCommand(
     }
     return buildSshExecArgs(
       backend.target,
-      `cd ${quoteShell(shellCwd)} && exec \\$SHELL -l`,
+      `cd ${quoteShell(shellCwd)} && exec "\${SHELL:-/bin/sh}" -l`,
       true,
     );
   }
