@@ -99,6 +99,34 @@ export function TaskView() {
     );
   };
 
+  const resetDeadTerminalSession = () => {
+    if (!activeTask) return;
+    const sessionKey = `${activeTask.id}-terminal`;
+    if (!isSessionDead(sessionKey)) return;
+    destroySession(sessionKey);
+  };
+
+  const resetTaskSessions = () => {
+    if (!activeTask) return;
+
+    destroySession(`${activeTask.id}-terminal`);
+    destroySession(`${activeTask.id}-console`);
+    destroySession(activeTask.id);
+
+    const updates = {
+      claude_session_id: null,
+      codex_session_id: null,
+    };
+    updateTask(activeTask.id, updates);
+    setActiveTask({ ...activeTask, ...updates });
+    setTasks(
+      useStore
+        .getState()
+        .tasks.map((t) => (t.id === activeTask.id ? { ...t, ...updates } : t)),
+    );
+    setFocusPane("none");
+  };
+
   const selectModel = (model: "claude" | "codex") => {
     if (!activeTask) return;
     if (activeTask.model === model) {
@@ -519,6 +547,7 @@ export function TaskView() {
     }
 
     if (input === "t" && !key.super) {
+      resetDeadTerminalSession();
       setFocusPane("terminal");
       return;
     }
@@ -628,6 +657,11 @@ export function TaskView() {
     // Copy mode toggle
     if (input === "y" && !key.super) {
       setCopyMode(true);
+      return;
+    }
+
+    if (input === "z" && !key.super) {
+      resetTaskSessions();
       return;
     }
   });
