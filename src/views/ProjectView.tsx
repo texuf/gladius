@@ -31,6 +31,7 @@ export function ProjectView() {
   const repos = useStore((s) => s.repos);
   const setRepos = useStore((s) => s.setRepos);
   const setView = useStore((s) => s.setView);
+  const setModal = useStore((s) => s.setModal);
   const setActiveProject = useStore((s) => s.setActiveProject);
   const backendReachability = useStore((s) => s.backendReachability);
   const setBackendReachability = useStore((s) => s.setBackendReachability);
@@ -77,6 +78,25 @@ export function ProjectView() {
     setAppState(`project.model.${activeProject.id}`, nextModel);
     setChordBuffer("");
     setFocusPane("console");
+  };
+
+  const openConsoleModelMenu = () => {
+    setModal({
+      type: "hotkeyMenu",
+      title: "console",
+      items: [
+        {
+          key: "l",
+          label: "New Claude session",
+          onSelect: () => selectModel("claude"),
+        },
+        {
+          key: "o",
+          label: "New Codex session",
+          onSelect: () => selectModel("codex"),
+        },
+      ],
+    });
   };
 
   const runRefresh = useCallback(() => {
@@ -182,17 +202,21 @@ export function ProjectView() {
       return;
     }
 
-    if (input === "c" && !key.super && model) {
-      setFocusPane("console");
+    if (input === "c" && !key.super) {
+      if (model) {
+        setFocusPane("console");
+      } else {
+        openConsoleModelMenu();
+      }
       return;
     }
 
-    if (input === "l" && !key.super && model) {
+    if (input === "l" && !key.super) {
       selectModel("claude");
       return;
     }
 
-    if (input === "o" && !key.super && model) {
+    if (input === "o" && !key.super) {
       selectModel("codex");
       return;
     }
@@ -214,7 +238,7 @@ export function ProjectView() {
 
     const { newBuffer, chord } = processChord(chordBuffer, input, key);
     setChordBuffer(newBuffer);
-    if (!model && (chord === "cl" || chord === "co")) {
+    if (chord === "cl" || chord === "co") {
       selectModel(chord === "cl" ? "claude" : "codex");
     }
   });

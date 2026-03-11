@@ -252,8 +252,12 @@ export async function refreshAllTaskStatuses(options?: {
 }): Promise<Record<string, TaskStatusColor>> {
   const tasks = getAllActiveTasks();
   const repoMap = getRepoMap();
-  const reachabilityByProject = getReachabilityForRepos(repoMap.values());
   const state = useStore.getState();
+  const skipRemotePoll =
+    state.view === "projects" || state.view === "projectView";
+  const reachabilityByProject = skipRemotePoll
+    ? {}
+    : getReachabilityForRepos(repoMap.values());
   const interacted = state.consoleInteractedTasks;
   const focusedTaskId =
     state.focusPane === "console" ? state.activeTask?.id : null;
@@ -263,6 +267,15 @@ export async function refreshAllTaskStatuses(options?: {
   await Promise.all(
     tasks.map(async (task) => {
       const repo = repoMap.get(task.repo_id);
+      if (repo && repo.project_backend_kind === "ssh" && skipRemotePoll) {
+        const previousGitStatus = state.gitStatuses[task.id];
+        if (previousGitStatus) {
+          gitStatuses[task.id] = previousGitStatus;
+        }
+        taskStatuses[task.id] = state.taskStatuses[task.id] ?? "gray";
+        return;
+      }
+
       if (
         repo &&
         reachabilityByProject[repo.project_id] === "offline" &&
