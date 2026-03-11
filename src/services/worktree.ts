@@ -1,6 +1,13 @@
 import { basename, dirname, join, posix as posixPath } from "path";
 import { homedir } from "os";
-import { existsSync, mkdirSync } from "fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  statSync,
+} from "fs";
+import { spawnSync } from "child_process";
 import type { Repo } from "../store/types.js";
 import {
   quoteShell,
@@ -54,6 +61,11 @@ function requireSuccess(stderr: string, stdout: string, exitCode: number, fallba
 
 function copyIgnoredEnvFiles(repo: RepoBackendContext, worktreePath: string): void {
   const backend = resolveRepoBackend(repo);
+  if (backend.kind === "local") {
+    copyIgnoredLocalEnvFiles(repo.path, worktreePath);
+    return;
+  }
+
   const command = [
     "find . \\(",
     "-path './node_modules' -o",
@@ -67,11 +79,109 @@ function copyIgnoredEnvFiles(repo: RepoBackendContext, worktreePath: string): vo
     '  [ -n "$rel" ] || continue',
     `  if git check-ignore "$rel" >/dev/null 2>&1; then`,
     `    mkdir -p ${quoteShell(worktreePath)}/"$(dirname "$rel")"`,
-    `    cp "$rel" ${quoteShell(worktreePath)}/"$rel" 2>/dev/null || true`,
+    `    cp "$rel" ${quoteShell(worktreePath)}/"$rel"`,
     "  fi",
     "done",
   ].join(" ");
-  runBackendCommand(backend, command, { cwd: repo.path });
+  const result = runBackendCommand(backend, command, { cwd: repo.path });
+  requireSuccess(
+    result.stderr,
+    result.stdout,
+    result.exitCode,
+    "Failed to copy ignored .env files.",
+  );
+}
+
+function copyIgnoredLocalEnvFiles(repoPath: string, worktreePath: string): void {
+  const envFiles = findEnvFiles(repoPath);
+  if (envFiles.length === 0) return;
+
+  const relativePaths = envFiles.map((filePath) => filePath.slice(repoPath.length + 1));
+  const ignoredPaths = getIgnoredPaths(repoPath, relativePaths);
+
+  for (const relativePath of relativePaths) {
+    if (!ignoredPaths.has(relativePath)) continue;
+
+    const sourcePath = join(repoPath, relativePath);
+    const destinationPath = join(worktreePath, relativePath);
+    const destinationDir = dirname(destinationPath);
+    if (!existsSync(destinationDir)) {
+      mkdirSync(destinationDir, { recursive: true });
+    }
+    copyFileSync(sourcePath, destinationPath);
+  }
+}
+
+function getIgnoredPaths(repoPath: string, relativePaths: string[]): Set<string> {
+  if (relativePaths.length === 0) return new Set<string>();
+
+  const result = spawnSync(
+    "git",
+    ["-C", repoPath, "check-ignore", "--stdin"],
+    {
+      input: relativePaths.join("\n"),
+      encoding: "utf8",
+    },
+  );
+
+  const exitCode = result.status ?? 1;
+  if (exitCode > 1) {
+    const detail = (result.stderr || result.stdout || "").trim();
+    throw new Error(detail || "Failed to determine ignored .env files.");
+  }
+
+  return new Set(
+    (result.stdout || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean),
+  );
+}
+
+function findEnvFiles(dir: string, depth = 0): string[] {
+  if (depth > 3) return [];
+
+  const results: string[] = [];
+  let entries:
+    | Array<{ name: string; isDirectory: () => boolean; isFile: () => boolean }>
+    | null = null;
+
+  try {
+    entries = readdirSync(dir, { withFileTypes: true }) as Array<{
+      name: string;
+      isDirectory: () => boolean;
+      isFile: () => boolean;
+    }>;
+  } catch {
+    entries = null;
+  }
+  if (!entries) return results;
+
+  for (const entry of entries) {
+    if (
+      entry.name === "node_modules" ||
+      entry.name === ".git" ||
+      entry.name === ".gladius" ||
+      entry.name === "dist" ||
+      entry.name === "build"
+    ) {
+      continue;
+    }
+
+    const fullPath = join(dir, entry.name);
+    try {
+      const stats = statSync(fullPath);
+      if (stats.isFile() && entry.name.startsWith(".env")) {
+        results.push(fullPath);
+      } else if (stats.isDirectory()) {
+        results.push(...findEnvFiles(fullPath, depth + 1));
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return results;
 }
 
 function createOrAttachWorktree(
