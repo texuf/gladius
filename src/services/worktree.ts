@@ -230,7 +230,7 @@ function createOrAttachWorktree(
           "else",
           `  git worktree add ${quoteShell(worktreePath)} -b ${quoteShell(branchName)} origin/"$main_branch"`,
           "fi",
-        ].join("; ")
+        ].join("\n")
       : [
           "git fetch origin >/dev/null 2>&1 || true",
           `if git rev-parse --verify ${quoteShell(branchName)} >/dev/null 2>&1; then`,
@@ -238,7 +238,7 @@ function createOrAttachWorktree(
           "else",
           `  git worktree add ${quoteShell(worktreePath)} -b ${quoteShell(branchName)} ${quoteShell(`origin/${branchName}`)}`,
           "fi",
-        ].join("; ");
+        ].join("\n");
 
   const result = runBackendCommand(backend, command, { cwd: repo.path });
   requireSuccess(
