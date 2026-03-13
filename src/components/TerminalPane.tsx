@@ -24,6 +24,7 @@ interface TerminalPaneProps {
   focusKey: string;
   layout?: "task" | "project";
   paused?: boolean;
+  sessionResetVersion?: number;
   workspaceId?: string;
   cwd?: string | null;
   model?: "claude" | "codex" | null;
@@ -64,6 +65,7 @@ export function TerminalPane({
   focusKey,
   layout = "task",
   paused = false,
+  sessionResetVersion = 0,
   workspaceId,
   cwd,
   model,
@@ -299,8 +301,8 @@ export function TerminalPane({
     : "";
   const embeddedKey =
     type === "console"
-      ? `${embeddedTaskId}-${effectiveModel ?? "none"}`
-      : embeddedTaskId;
+      ? `${embeddedTaskId}-${effectiveModel ?? "none"}-${sessionResetVersion}`
+      : `${embeddedTaskId}-${sessionResetVersion}`;
 
   const handleSessionReady = useCallback(
     async (isNewSession: boolean) => {

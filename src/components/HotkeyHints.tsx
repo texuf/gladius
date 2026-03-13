@@ -97,7 +97,7 @@ export function HotkeyHints() {
       "^A Adopt",
       "^S From Commit",
       "/ Search",
-      "Ctrl+O Projects",
+      "g Project",
     );
   } else if (view === "taskView") {
     if (copyMode) {
@@ -121,6 +121,7 @@ export function HotkeyHints() {
         ...modelHints,
         ...prHints,
         ...mergeHints,
+        "z Reset panes",
         "y Copy",
         "r Refresh",
         "Esc Back",

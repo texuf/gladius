@@ -6,7 +6,9 @@ import {
   getTasksForRepo,
   isProjectLinearEnabled,
   closeTask as dbCloseTask,
+  getProjectById,
   swapTaskOrder,
+  touchProject,
   touchTask,
   createTask as dbCreateTask,
   reopenTask as dbReopenTask,
@@ -64,6 +66,8 @@ export function TaskList() {
   const selectedIndex = useStore((s) => s.selectedIndex);
   const setSelectedIndex = useStore((s) => s.setSelectedIndex);
   const setView = useStore((s) => s.setView);
+  const setActiveProject = useStore((s) => s.setActiveProject);
+  const setActiveRepo = useStore((s) => s.setActiveRepo);
   const setActiveTask = useStore((s) => s.setActiveTask);
   const modal = useStore((s) => s.modal);
   const setModal = useStore((s) => s.setModal);
@@ -292,6 +296,16 @@ export function TaskList() {
       // No-op — task is being closed
     } else if (key.return && selectedTask?.status === "closed") {
       void handleReopenTask(selectedTask);
+    } else if (input === "g" && !key.super && activeRepo) {
+      const project = getProjectById(activeRepo.project_id);
+      if (project) {
+        setActiveRepo(null);
+        setTasks([]);
+        setActiveTask(null);
+        touchProject(project.id);
+        setActiveProject(project);
+        setView("projectView");
+      }
     } else if (input === "x" && selectedTask?.status === "active") {
       setModal({
         type: "confirm",

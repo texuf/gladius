@@ -146,10 +146,11 @@ export function openBackendLlmCommand(
     if (!backend.target) {
       throw new Error("SSH backend is missing a target");
     }
-    const remoteCommand =
+    const llmCommand =
       model === "claude"
         ? `cd ${quoteShell(cwd)} && exec claude`
         : `cd ${quoteShell(cwd)} && exec codex -C ${quoteShell(cwd)}`;
+    const remoteCommand = `exec "\${SHELL:-/bin/sh}" -lc ${quoteShell(llmCommand)}`;
     return buildSshExecArgs(backend.target, remoteCommand, true);
   }
   return model === "claude"

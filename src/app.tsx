@@ -166,8 +166,8 @@ export function App() {
       return;
     }
 
-    // Ctrl+O / Cmd+Shift+0 — Return to Repo Selection
-    if ((input === "o" && key.ctrl) || (input === ")" && key.super)) {
+    // Cmd+Shift+0 — Return to Repo Selection
+    if (input === ")" && key.super) {
       setView("projects");
       return;
     }

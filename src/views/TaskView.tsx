@@ -71,6 +71,8 @@ export function TaskView() {
   const [busyLabel, setBusyLabel] = useState("Fetching");
   const [actionError, setActionError] = useState("");
   const shouldAutoPoll = activeRepo?.project_backend_kind !== "ssh";
+  const [terminalResetVersion, setTerminalResetVersion] = useState(0);
+  const [consoleResetVersion, setConsoleResetVersion] = useState(0);
 
   const markConsoleInteracted = (taskId: string) => {
     useStore.getState().markConsoleInteracted(taskId);
@@ -85,6 +87,7 @@ export function TaskView() {
     if (!isSessionDead(sessionKey)) return;
 
     destroySession(sessionKey);
+    setConsoleResetVersion((value) => value + 1);
 
     const updates =
       activeTask.model === "claude"
@@ -104,6 +107,7 @@ export function TaskView() {
     const sessionKey = `${activeTask.id}-terminal`;
     if (!isSessionDead(sessionKey)) return;
     destroySession(sessionKey);
+    setTerminalResetVersion((value) => value + 1);
   };
 
   const resetTaskSessions = () => {
@@ -112,6 +116,8 @@ export function TaskView() {
     destroySession(`${activeTask.id}-terminal`);
     destroySession(`${activeTask.id}-console`);
     destroySession(activeTask.id);
+    setTerminalResetVersion((value) => value + 1);
+    setConsoleResetVersion((value) => value + 1);
 
     const updates = {
       claude_session_id: null,
@@ -1060,6 +1066,7 @@ export function TaskView() {
         focusKey="t"
         paused={copyMode}
         layout="task"
+        sessionResetVersion={terminalResetVersion}
       />
 
       {/* Console Pane */}
@@ -1069,6 +1076,7 @@ export function TaskView() {
         focusKey="c"
         paused={copyMode}
         layout="task"
+        sessionResetVersion={consoleResetVersion}
       />
 
       {/* Confirm Modal */}
