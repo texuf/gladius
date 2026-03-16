@@ -12,7 +12,7 @@ import type { Repo } from "../store/types.js";
 import {
   quoteShell,
   resolveProjectBackend,
-  runBackendCommand,
+  runBackendCommandAsync,
 } from "./projectBackend.js";
 import { BRANCH_PREFIX } from "../utils/constants.js";
 
@@ -28,6 +28,8 @@ type RepoBackendContext = Pick<
   | "project_name"
 >;
 
+const repoMutationQueues = new Map<string, Promise<void>>();
+
 function resolveRepoBackend(repo: RepoBackendContext) {
   return resolveProjectBackend({
     backend_kind: repo.project_backend_kind,
@@ -37,6 +39,35 @@ function resolveRepoBackend(repo: RepoBackendContext) {
     path: repo.project_path,
     name: repo.project_name,
   });
+}
+
+function getRepoMutationKey(repo: RepoBackendContext): string {
+  const backend = resolveRepoBackend(repo);
+  return [backend.kind, backend.target || "", repo.path].join(":");
+}
+
+async function queueRepoMutation<T>(
+  repo: RepoBackendContext,
+  mutation: () => Promise<T>,
+): Promise<T> {
+  const key = getRepoMutationKey(repo);
+  const previous = repoMutationQueues.get(key) ?? Promise.resolve();
+  let releaseCurrent!: () => void;
+  const current = new Promise<void>((resolve) => {
+    releaseCurrent = resolve;
+  });
+  const queued = previous.catch(() => undefined).then(() => current);
+  repoMutationQueues.set(key, queued);
+
+  await previous.catch(() => undefined);
+  try {
+    return await mutation();
+  } finally {
+    releaseCurrent();
+    if (repoMutationQueues.get(key) === queued) {
+      repoMutationQueues.delete(key);
+    }
+  }
 }
 
 function getLocalWorktreePath(repoPath: string, label: string): string {
@@ -59,7 +90,10 @@ function requireSuccess(stderr: string, stdout: string, exitCode: number, fallba
   throw new Error(detail || fallback);
 }
 
-function copyIgnoredEnvFiles(repo: RepoBackendContext, worktreePath: string): void {
+async function copyIgnoredEnvFiles(
+  repo: RepoBackendContext,
+  worktreePath: string,
+): Promise<void> {
   const backend = resolveRepoBackend(repo);
   if (backend.kind === "local") {
     copyIgnoredLocalEnvFiles(repo.path, worktreePath);
@@ -83,7 +117,7 @@ function copyIgnoredEnvFiles(repo: RepoBackendContext, worktreePath: string): vo
     "  fi",
     "done",
   ].join("\n");
-  const result = runBackendCommand(backend, command, { cwd: repo.path });
+  const result = await runBackendCommandAsync(backend, command, { cwd: repo.path });
   requireSuccess(
     result.stderr,
     result.stdout,
@@ -184,79 +218,81 @@ function findEnvFiles(dir: string, depth = 0): string[] {
   return results;
 }
 
-function createOrAttachWorktree(
+async function createOrAttachWorktree(
   repo: RepoBackendContext,
   label: string,
   branchName: string,
   mode: "new" | "adopt",
-): string {
-  const backend = resolveRepoBackend(repo);
-  const worktreePath =
-    backend.kind === "ssh"
-      ? (() => {
-          const result = runBackendCommand(
-            backend,
-            getRemoteWorktreePathScript(repo.path, label),
-            { cwd: repo.path },
-          );
-          requireSuccess(
-            result.stderr,
-            result.stdout,
-            result.exitCode,
-            "Failed to prepare remote worktree directory.",
-          );
-          return result.stdout.trim().split(/\r?\n/).filter(Boolean).pop() || "";
-        })()
-      : getLocalWorktreePath(repo.path, label);
+): Promise<string> {
+  return queueRepoMutation(repo, async () => {
+    const backend = resolveRepoBackend(repo);
+    const resolvedWorktreePath =
+      backend.kind === "ssh"
+        ? await (async () => {
+            const result = await runBackendCommandAsync(
+              backend,
+              getRemoteWorktreePathScript(repo.path, label),
+              { cwd: repo.path },
+            );
+            requireSuccess(
+              result.stderr,
+              result.stdout,
+              result.exitCode,
+              "Failed to prepare remote worktree directory.",
+            );
+            return result.stdout.trim().split(/\r?\n/).filter(Boolean).pop() || "";
+          })()
+        : getLocalWorktreePath(repo.path, label);
 
-  if (!worktreePath) {
-    throw new Error("Failed to resolve worktree path.");
-  }
-  if (backend.kind === "local") {
-    const worktreeDir = dirname(worktreePath);
-    if (!existsSync(worktreeDir)) {
-      mkdirSync(worktreeDir, { recursive: true });
+    if (!resolvedWorktreePath) {
+      throw new Error("Failed to resolve worktree path.");
     }
-  }
+    if (backend.kind === "local") {
+      const worktreeDir = dirname(resolvedWorktreePath);
+      if (!existsSync(worktreeDir)) {
+        mkdirSync(worktreeDir, { recursive: true });
+      }
+    }
 
-  const command =
-    mode === "new"
-      ? [
-          "git fetch origin >/dev/null 2>&1 || true",
-          "main_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's#refs/remotes/origin/##')",
-          'if [ -z "$main_branch" ]; then',
-          '  if git rev-parse --verify origin/main >/dev/null 2>&1; then',
-          '    main_branch=main',
-          '  elif git rev-parse --verify origin/master >/dev/null 2>&1; then',
-          '    main_branch=master',
-          "  fi",
-          "fi",
-          '[ -n "$main_branch" ] || { echo "Could not determine default branch from origin/HEAD, origin/main, or origin/master." >&2; exit 1; }',
-          `if git rev-parse --verify ${quoteShell(branchName)} >/dev/null 2>&1; then`,
-          `  git worktree add ${quoteShell(worktreePath)} ${quoteShell(branchName)}`,
-          "else",
-          `  git worktree add ${quoteShell(worktreePath)} -b ${quoteShell(branchName)} origin/"$main_branch"`,
-          "fi",
-        ].join("\n")
-      : [
-          "git fetch origin >/dev/null 2>&1 || true",
-          `if git rev-parse --verify ${quoteShell(branchName)} >/dev/null 2>&1; then`,
-          `  git worktree add ${quoteShell(worktreePath)} ${quoteShell(branchName)}`,
-          "else",
-          `  git worktree add ${quoteShell(worktreePath)} -b ${quoteShell(branchName)} ${quoteShell(`origin/${branchName}`)}`,
-          "fi",
-        ].join("\n");
+    const command =
+      mode === "new"
+        ? [
+            "git fetch origin >/dev/null 2>&1 || true",
+            "main_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's#refs/remotes/origin/##')",
+            'if [ -z "$main_branch" ]; then',
+            '  if git rev-parse --verify origin/main >/dev/null 2>&1; then',
+            '    main_branch=main',
+            '  elif git rev-parse --verify origin/master >/dev/null 2>&1; then',
+            '    main_branch=master',
+            "  fi",
+            "fi",
+            '[ -n "$main_branch" ] || { echo "Could not determine default branch from origin/HEAD, origin/main, or origin/master." >&2; exit 1; }',
+            `if git rev-parse --verify ${quoteShell(branchName)} >/dev/null 2>&1; then`,
+            `  git worktree add ${quoteShell(resolvedWorktreePath)} ${quoteShell(branchName)}`,
+            "else",
+            `  git worktree add ${quoteShell(resolvedWorktreePath)} -b ${quoteShell(branchName)} origin/"$main_branch"`,
+            "fi",
+          ].join("\n")
+        : [
+            "git fetch origin >/dev/null 2>&1 || true",
+            `if git rev-parse --verify ${quoteShell(branchName)} >/dev/null 2>&1; then`,
+            `  git worktree add ${quoteShell(resolvedWorktreePath)} ${quoteShell(branchName)}`,
+            "else",
+            `  git worktree add ${quoteShell(resolvedWorktreePath)} -b ${quoteShell(branchName)} ${quoteShell(`origin/${branchName}`)}`,
+            "fi",
+          ].join("\n");
 
-  const result = runBackendCommand(backend, command, { cwd: repo.path });
-  requireSuccess(
-    result.stderr,
-    result.stdout,
-    result.exitCode,
-    "Failed to create git worktree.",
-  );
+    const result = await runBackendCommandAsync(backend, command, { cwd: repo.path });
+    requireSuccess(
+      result.stderr,
+      result.stdout,
+      result.exitCode,
+      "Failed to create git worktree.",
+    );
 
-  copyIgnoredEnvFiles(repo, worktreePath);
-  return worktreePath;
+    await copyIgnoredEnvFiles(repo, resolvedWorktreePath);
+    return resolvedWorktreePath;
+  });
 }
 
 export async function createWorktree(
@@ -264,7 +300,7 @@ export async function createWorktree(
   label: string,
 ): Promise<string> {
   const branchName = `${BRANCH_PREFIX}/${label}`;
-  return createOrAttachWorktree(repo, label, branchName, "new");
+  return await createOrAttachWorktree(repo, label, branchName, "new");
 }
 
 export async function adoptBranch(
@@ -272,7 +308,7 @@ export async function adoptBranch(
   remoteBranch: string,
   label: string,
 ): Promise<string> {
-  return createOrAttachWorktree(repo, label, remoteBranch, "adopt");
+  return await createOrAttachWorktree(repo, label, remoteBranch, "adopt");
 }
 
 export async function deleteWorktree(
@@ -280,15 +316,17 @@ export async function deleteWorktree(
   worktreePath: string,
   branchName?: string | null,
 ): Promise<void> {
-  const backend = resolveRepoBackend(repo);
-  const command = [
-    `git worktree remove ${quoteShell(worktreePath)} --force >/dev/null 2>&1 || true`,
-    "git worktree prune >/dev/null 2>&1 || true",
-    branchName
-      ? `git branch -D ${quoteShell(branchName)} >/dev/null 2>&1 || true`
-      : "",
-  ]
-    .filter(Boolean)
-    .join("; ");
-  runBackendCommand(backend, command, { cwd: repo.path });
+  await queueRepoMutation(repo, async () => {
+    const backend = resolveRepoBackend(repo);
+    const command = [
+      `git worktree remove ${quoteShell(worktreePath)} --force >/dev/null 2>&1 || true`,
+      "git worktree prune >/dev/null 2>&1 || true",
+      branchName
+        ? `git branch -D ${quoteShell(branchName)} >/dev/null 2>&1 || true`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("; ");
+    await runBackendCommandAsync(backend, command, { cwd: repo.path });
+  });
 }

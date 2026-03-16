@@ -1,4 +1,4 @@
-import { spawnSync } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { posix as posixPath } from "path";
 import { existsSync } from "fs";
 import type { Project, ProjectBackendKind } from "../store/types.js";
@@ -196,6 +196,88 @@ export function runBackendCommand(
     stderr: result.stderr || "",
     exitCode: result.status ?? 1,
   };
+}
+
+export function runBackendCommandAsync(
+  backend: ResolvedProjectBackend,
+  command: string,
+  options?: RunCommandOptions,
+): Promise<BackendRunResult> {
+  const cwd = options?.cwd?.trim() || backend.basePath;
+
+  if (backend.kind === "ssh") {
+    if (!backend.target) {
+      return Promise.resolve({
+        stdout: "",
+        stderr: "SSH backend is missing a target.",
+        exitCode: 1,
+      });
+    }
+    return new Promise((resolve) => {
+      const child = spawn(
+        "ssh",
+        buildSshExecArgs(backend.target, buildRemoteCommand(cwd, command)).slice(1),
+        { stdio: ["ignore", "pipe", "pipe"] },
+      );
+      let stdout = "";
+      let stderr = "";
+      child.stdout?.setEncoding("utf8");
+      child.stderr?.setEncoding("utf8");
+      child.stdout?.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr?.on("data", (chunk) => {
+        stderr += chunk;
+      });
+      child.on("error", (error) => {
+        resolve({
+          stdout,
+          stderr: stderr || error.message,
+          exitCode: 1,
+        });
+      });
+      child.on("close", (code) => {
+        resolve({
+          stdout,
+          stderr,
+          exitCode: code ?? 1,
+        });
+      });
+    });
+  }
+
+  const localCommand = cwd
+    ? `cd ${quoteShell(cwd)} && ${command}`
+    : command;
+  return new Promise((resolve) => {
+    const child = spawn(process.env.SHELL || "/bin/zsh", ["-lc", localCommand], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      resolve({
+        stdout,
+        stderr: stderr || error.message,
+        exitCode: 1,
+      });
+    });
+    child.on("close", (code) => {
+      resolve({
+        stdout,
+        stderr,
+        exitCode: code ?? 1,
+      });
+    });
+  });
 }
 
 export function checkBackendDependencies(
