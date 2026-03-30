@@ -142,6 +142,15 @@ export function App() {
 
   useInput((input, key) => {
     const mod = hasModifier(key);
+    const focusPane = useStore.getState().focusPane;
+
+    if (input === "c" && key.ctrl) {
+      if (focusPane === "terminal" || focusPane === "console") {
+        return;
+      }
+      exit();
+      return;
+    }
 
     // Cmd+Q / Ctrl+Q — Quit
     if (input === "q" && mod) {
@@ -151,7 +160,6 @@ export function App() {
 
     // Don't process global shortcuts if a modal is open, text input is active,
     // or a terminal/console pane is focused (only Esc handled there)
-    const focusPane = useStore.getState().focusPane;
     if (modal || addingRepo || focusPane !== "none") return;
 
     // Repos page: plain q quits.
