@@ -969,6 +969,26 @@ export function TaskView() {
     else if (color === "gray") allDots.gray++;
   }
 
+  const taskHelpLines = [
+    [
+      "i Notes",
+      "t Terminal",
+      activeTask.model ? "c Console" : "c Console (choose model)",
+    ],
+    ["o Open menu", "g Git menu", "l LazyGit"],
+    ["r Refresh", "y Copy mode", "z Reset panes"],
+    ["Esc Back", "x Close task"],
+  ];
+
+  if (prTaskColor === "red" || prTaskColor === "yellow") {
+    taskHelpLines[3] = [...taskHelpLines[3], "v PR issues"];
+  }
+  if (prTaskColor === "green") {
+    taskHelpLines[3] = [...taskHelpLines[3], "s Squash merge"];
+  }
+
+  const showIdleHelp = focusPane === "none" && !copyMode && !modal;
+
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={1}>
       {/* Header */}
@@ -1078,6 +1098,35 @@ export function TaskView() {
         layout="task"
         sessionResetVersion={consoleResetVersion}
       />
+
+      {showIdleHelp && (
+        <Box
+          position="absolute"
+          width="100%"
+          height="100%"
+          justifyContent="center"
+          alignItems="center"
+          pointerEvents="none"
+        >
+          <Box
+            flexDirection="column"
+            borderStyle="double"
+            borderColor="yellow"
+            paddingX={2}
+            paddingY={1}
+            backgroundColor="black"
+          >
+            <Text bold color="yellow">
+              Task Shortcuts
+            </Text>
+            <Box flexDirection="column" marginTop={1}>
+              {taskHelpLines.map((line, index) => (
+                <Text key={`task-help-${index}`}>{line.join("   ")}</Text>
+              ))}
+            </Box>
+          </Box>
+        </Box>
+      )}
 
       {/* Confirm Modal */}
       {modal?.type === "confirm" && (
