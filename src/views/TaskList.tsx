@@ -33,6 +33,46 @@ type TaskListRow =
   | { kind: "linear"; issue: LinearIssue }
   | { kind: "task"; task: Task };
 
+type TaskListSection = "linear" | "tasks" | "closed";
+
+type DisplayItem =
+  | {
+      kind: "header";
+      key: string;
+      section: TaskListSection;
+      label: string;
+    }
+  | {
+      kind: "placeholder";
+      key: string;
+      section: TaskListSection;
+      text: string;
+    }
+  | {
+      kind: "linear";
+      key: string;
+      section: "linear";
+      rowIndex: number;
+      issue: LinearIssue;
+    }
+  | {
+      kind: "taskMain";
+      key: string;
+      section: "tasks" | "closed";
+      rowIndex: number;
+      task: Task;
+    }
+  | {
+      kind: "taskStatus";
+      key: string;
+      section: "tasks";
+      rowIndex: number;
+      text: string;
+    };
+
+const TASK_LIST_VIEWPORT_RESERVED_ROWS = 5;
+const MIN_TASK_LIST_VIEWPORT_ROWS = 6;
+
 function getTaskListRowKey(row: TaskListRow | undefined): string | null {
   if (!row) return null;
   return row.kind === "linear" ? `linear:${row.issue.id}` : `task:${row.task.id}`;
@@ -78,6 +118,8 @@ export function TaskList() {
   const [creating, setCreating] = useState(false);
   const [linearIssues, setLinearIssues] = useState<LinearIssue[]>([]);
   const [linearLoading, setLinearLoading] = useState(false);
+  const [screenRows, setScreenRows] = useState(process.stdout.rows || 24);
+  const [scrollTop, setScrollTop] = useState(0);
   const activeTask = useStore((s) => s.activeTask);
   const userNavigatedRef = useRef(false);
   const selectedRowKeyRef = useRef<string | null>(null);
@@ -134,6 +176,142 @@ export function TaskList() {
     [visibleLinearIssues, allTasks],
   );
 
+  const viewportRows = Math.max(
+    MIN_TASK_LIST_VIEWPORT_ROWS,
+    screenRows - TASK_LIST_VIEWPORT_RESERVED_ROWS,
+  );
+
+  const displayItems = useMemo(() => {
+    const items: DisplayItem[] = [];
+    let rowIndex = 0;
+
+    if (linearEnabled) {
+      items.push({
+        kind: "header",
+        key: "section-linear",
+        section: "linear",
+        label: `Linear${linearLoading ? "" : ` (${visibleLinearIssues.length})`}`,
+      });
+
+      if (linearLoading) {
+        items.push({
+          kind: "placeholder",
+          key: "linear-loading",
+          section: "linear",
+          text: "Loading assigned issues...",
+        });
+      } else if (visibleLinearIssues.length === 0) {
+        items.push({
+          kind: "placeholder",
+          key: "linear-empty",
+          section: "linear",
+          text: "No uncompleted assigned issues.",
+        });
+      } else {
+        for (const issue of visibleLinearIssues) {
+          items.push({
+            kind: "linear",
+            key: `linear:${issue.id}`,
+            section: "linear",
+            rowIndex,
+            issue,
+          });
+          rowIndex += 1;
+        }
+      }
+    }
+
+    items.push({
+      kind: "header",
+      key: "section-tasks",
+      section: "tasks",
+      label: `Tasks (${activeTasks.length})`,
+    });
+
+    if (activeTasks.length === 0) {
+      items.push({
+        kind: "placeholder",
+        key: "tasks-empty",
+        section: "tasks",
+        text:
+          closedTasks.length > 0
+            ? "No active tasks."
+            : `No tasks. Press Ctrl+N to create one.${linearEnabled ? " Press Enter on a Linear issue to create from ticket." : ""}`,
+      });
+    } else {
+      for (const task of activeTasks) {
+        items.push({
+          kind: "taskMain",
+          key: `task:${task.id}:main`,
+          section: "tasks",
+          rowIndex,
+          task,
+        });
+        const status = gitStatuses[task.id];
+        if (status) {
+          items.push({
+            kind: "taskStatus",
+            key: `task:${task.id}:status`,
+            section: "tasks",
+            rowIndex,
+            text: formatGitStatus(status),
+          });
+        }
+        rowIndex += 1;
+      }
+    }
+
+    if (closedTasks.length > 0) {
+      items.push({
+        kind: "header",
+        key: "section-closed",
+        section: "closed",
+        label: `Closed (${closedTasks.length})`,
+      });
+
+      for (const task of closedTasks) {
+        items.push({
+          kind: "taskMain",
+          key: `task:${task.id}:main`,
+          section: "closed",
+          rowIndex,
+          task,
+        });
+        rowIndex += 1;
+      }
+    }
+
+    return items;
+  }, [
+    activeTasks,
+    closedTasks,
+    gitStatuses,
+    linearEnabled,
+    linearLoading,
+    visibleLinearIssues,
+  ]);
+
+  const rowDisplayIndexMap = useMemo(() => {
+    const next = new Map<number, number>();
+    for (let i = 0; i < displayItems.length; i += 1) {
+      const item = displayItems[i];
+      if (item.kind === "linear" || item.kind === "taskMain") {
+        next.set(item.rowIndex, i);
+      }
+    }
+    return next;
+  }, [displayItems]);
+
+  const scrollAnchors = useMemo(
+    () =>
+      displayItems.flatMap((item, index) =>
+        item.kind === "taskStatus" ? [] : [index],
+      ),
+    [displayItems],
+  );
+
+  const selectedDisplayIndex = rowDisplayIndexMap.get(selectedIndex) ?? -1;
+
   useEffect(() => {
     if (!activeRepo || !linearEnabled) {
       setLinearIssues([]);
@@ -157,6 +335,14 @@ export function TaskList() {
     };
   }, [activeRepo?.id, activeRepo?.path, linearEnabled, linearTeam]);
 
+  useEffect(() => {
+    const handleResize = () => setScreenRows(process.stdout.rows || 24);
+    process.stdout.on("resize", handleResize);
+    return () => {
+      process.stdout.off("resize", handleResize);
+    };
+  }, []);
+
   // Keep selection in bounds when rows appear/disappear.
   useEffect(() => {
     const max = Math.max(0, rows.length - 1);
@@ -173,6 +359,7 @@ export function TaskList() {
     initializedSelectionRef.current = false;
     userNavigatedRef.current = false;
     selectedRowKeyRef.current = null;
+    setScrollTop(0);
   }, [activeRepo?.id]);
 
   // Track the selected row identity based on explicit index moves.
@@ -237,6 +424,52 @@ export function TaskList() {
     activeTask?.id,
     setSelectedIndex,
   ]);
+
+  useEffect(() => {
+    if (displayItems.length === 0 || scrollAnchors.length === 0) {
+      setScrollTop(0);
+      return;
+    }
+
+    const getVisibleCapacity = (anchorTop: number) =>
+      Math.max(
+        1,
+        viewportRows - (displayItems[anchorTop]?.kind === "header" ? 0 : 1),
+      );
+
+    setScrollTop((prev) => {
+      const maxAnchor = scrollAnchors[scrollAnchors.length - 1] ?? 0;
+      let anchorIndex = 0;
+      for (let i = 0; i < scrollAnchors.length; i += 1) {
+        if (scrollAnchors[i] <= prev) {
+          anchorIndex = i;
+        } else {
+          break;
+        }
+      }
+
+      let nextTop = Math.min(scrollAnchors[anchorIndex] ?? 0, maxAnchor);
+
+      if (selectedDisplayIndex < 0) {
+        return nextTop;
+      }
+
+      while (selectedDisplayIndex < nextTop && anchorIndex > 0) {
+        anchorIndex -= 1;
+        nextTop = scrollAnchors[anchorIndex];
+      }
+
+      while (
+        selectedDisplayIndex >= nextTop + getVisibleCapacity(nextTop) &&
+        anchorIndex < scrollAnchors.length - 1
+      ) {
+        anchorIndex += 1;
+        nextTop = scrollAnchors[anchorIndex];
+      }
+
+      return nextTop;
+    });
+  }, [displayItems, scrollAnchors, selectedDisplayIndex, viewportRows]);
 
   useInput((input, key) => {
     if (modal || creating) return;
@@ -423,8 +656,42 @@ export function TaskList() {
   };
 
   if (!activeRepo) return null;
+  const stickySection =
+    displayItems[scrollTop] && displayItems[scrollTop].kind !== "header"
+      ? displayItems[scrollTop].section
+      : null;
+  const visibleItems: Array<
+    DisplayItem | { kind: "stickyHeader"; key: string; section: TaskListSection; label: string }
+  > = [];
+  const sectionLabels: Record<TaskListSection, string> = {
+    linear: `Linear${linearLoading ? "" : ` (${visibleLinearIssues.length})`}`,
+    tasks: `Tasks (${activeTasks.length})`,
+    closed: `Closed (${closedTasks.length})`,
+  };
 
-  let rowIdx = 0;
+  let remainingRows = viewportRows;
+  if (stickySection) {
+    visibleItems.push({
+      kind: "stickyHeader",
+      key: `sticky:${stickySection}`,
+      section: stickySection,
+      label: sectionLabels[stickySection],
+    });
+    remainingRows -= 1;
+  }
+
+  for (let i = scrollTop; i < displayItems.length && remainingRows > 0; i += 1) {
+    const item = displayItems[i];
+    if (
+      stickySection &&
+      item.kind === "header" &&
+      item.section === stickySection
+    ) {
+      continue;
+    }
+    visibleItems.push(item);
+    remainingRows -= 1;
+  }
 
   return (
     <Box flexDirection="column" paddingX={1} flexGrow={1}>
@@ -432,87 +699,89 @@ export function TaskList() {
         <Text bold color="cyan">
           {activeRepo.name}
         </Text>
-        {(() => {
-          const dots = { green: 0, red: 0, orange: 0, yellow: 0, purple: 0 };
-          for (const color of Object.values(taskStatuses)) {
-            if (color === "green") dots.green++;
-            else if (color === "red") dots.red++;
-            else if (color === "orange") dots.orange++;
-            else if (color === "yellow") dots.yellow++;
-            else if (color === "purple") dots.purple++;
-          }
-          return <StatusDots {...dots} />;
-        })()}
-      </Box>
-
-      {linearEnabled && (
-        <Box flexDirection="column" marginBottom={1}>
-          <Text bold>Linear</Text>
-          {linearLoading && (
-            <Box paddingLeft={1}>
-              <Text dimColor>Loading assigned issues...</Text>
-            </Box>
+        <Box>
+          {rows.length > 0 && (
+            <Text dimColor>
+              {Math.min(selectedIndex + 1, rows.length)}/{rows.length}
+              {"  "}
+            </Text>
           )}
-          {!linearLoading && visibleLinearIssues.length === 0 && (
-            <Box paddingLeft={1}>
-              <Text dimColor>No uncompleted assigned issues.</Text>
-            </Box>
-          )}
-          {!linearLoading &&
-            visibleLinearIssues.map((issue) => {
-              const idx = rowIdx++;
-              const isSelected = idx === selectedIndex;
-              const status = `${issue.statusIcon ? `${issue.statusIcon} ` : ""}${issue.status}`.trim();
-              const idCol = issue.id.padEnd(linearIdColumnWidth);
-              const statusCol = status.padEnd(linearStatusColumnWidth);
-              return (
-                <Box key={issue.id} paddingLeft={1}>
-                  <Text
-                    color={isSelected ? "cyan" : undefined}
-                    bold={isSelected}
-                  >
-                    {isSelected ? " ▸ " : "   "}
-                    {idCol}
-                    {"  "}
-                    {statusCol}
-                    {"  "}
-                    {issue.title}
-                  </Text>
-                </Box>
-              );
-            })}
+          {(() => {
+            const dots = {
+              green: 0,
+              red: 0,
+              orange: 0,
+              yellow: 0,
+              purple: 0,
+              gray: 0,
+            };
+            for (const color of Object.values(taskStatuses)) {
+              if (color === "green") dots.green++;
+              else if (color === "red") dots.red++;
+              else if (color === "orange") dots.orange++;
+              else if (color === "yellow") dots.yellow++;
+              else if (color === "purple") dots.purple++;
+              else if (color === "gray") dots.gray++;
+            }
+            return <StatusDots {...dots} />;
+          })()}
         </Box>
-      )}
-
-      <Box justifyContent="space-between" marginBottom={1}>
-        <Text bold>Tasks</Text>
-        <Text dimColor>Ctrl+N: New</Text>
       </Box>
 
-      {allTasks.length === 0 && (
-        <Text dimColor>
-          No tasks. Press Ctrl+N to create one.
-          {linearEnabled ? " Press Enter on a Linear issue to create from ticket." : ""}
-        </Text>
-      )}
+      <Box flexDirection="column" flexGrow={1}>
+        {visibleItems.map((item) => {
+          if (item.kind === "header" || item.kind === "stickyHeader") {
+            return (
+              <Box key={item.key}>
+                <Text bold color="yellow">
+                  {item.label}
+                </Text>
+              </Box>
+            );
+          }
 
-      {allTasks.map((task, i) => {
-        const idx = rowIdx++;
-        const isSelected = idx === selectedIndex;
-        const isClosed = task.status === "closed";
-        const isClosing = task.status === "closing";
-        const status = gitStatuses[task.id];
-        const taskColor = taskStatuses[task.id];
-        const prevTask = allTasks[i - 1];
-        const isFirstClosed = isClosed && prevTask && prevTask.status !== "closed";
-        return (
-          <Box
-            key={task.id}
-            flexDirection="column"
-            paddingLeft={1}
-            marginTop={isFirstClosed ? 1 : 0}
-          >
-            <Box>
+          if (item.kind === "placeholder") {
+            return (
+              <Box key={item.key} paddingLeft={1}>
+                <Text dimColor>{item.text}</Text>
+              </Box>
+            );
+          }
+
+          if (item.kind === "linear") {
+            const isSelected = item.rowIndex === selectedIndex;
+            const status = `${item.issue.statusIcon ? `${item.issue.statusIcon} ` : ""}${item.issue.status}`.trim();
+            const idCol = item.issue.id.padEnd(linearIdColumnWidth);
+            const statusCol = status.padEnd(linearStatusColumnWidth);
+            return (
+              <Box key={item.key} paddingLeft={1}>
+                <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>
+                  {isSelected ? " ▸ " : "   "}
+                  {idCol}
+                  {"  "}
+                  {statusCol}
+                  {"  "}
+                  {item.issue.title}
+                </Text>
+              </Box>
+            );
+          }
+
+          if (item.kind === "taskStatus") {
+            return (
+              <Box key={item.key} paddingLeft={4}>
+                <Text dimColor>{item.text}</Text>
+              </Box>
+            );
+          }
+
+          const isSelected = item.rowIndex === selectedIndex;
+          const isClosed = item.task.status === "closed";
+          const isClosing = item.task.status === "closing";
+          const taskColor = taskStatuses[item.task.id];
+
+          return (
+            <Box key={item.key} paddingLeft={1}>
               {!isClosed && !isClosing && taskColor && taskColor !== "none" ? (
                 <StatusDots
                   green={taskColor === "green" ? 1 : 0}
@@ -531,20 +800,19 @@ export function TaskList() {
                 dimColor={(isClosed || isClosing) && !isSelected}
               >
                 {isSelected ? " ▸ " : "   "}
-                {isClosing ? "[closing...] " : isClosed ? `${formatClosedDate(task.closed_at)} - ` : ""}
-                {task.description.length > 50
-                  ? task.description.slice(0, 50) + "..."
-                  : task.description}
+                {isClosing
+                  ? "[closing...] "
+                  : isClosed
+                    ? `${formatClosedDate(item.task.closed_at)} - `
+                    : ""}
+                {item.task.description.length > 50
+                  ? item.task.description.slice(0, 50) + "..."
+                  : item.task.description}
               </Text>
             </Box>
-            {status && !isClosed && (
-              <Box paddingLeft={4}>
-                <Text dimColor>{formatGitStatus(status)}</Text>
-              </Box>
-            )}
-          </Box>
-        );
-      })}
+          );
+        })}
+      </Box>
 
       {modal?.type === "confirm" && (
         <ConfirmModal
