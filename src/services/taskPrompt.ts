@@ -70,9 +70,25 @@ function sanitizePromptText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+const CLAUDE_SYNTHETIC_MESSAGE_PREFIXES = [
+  "<command-name>",
+  "<command-message>",
+  "<command-args>",
+  "<local-command-stdout>",
+  "<local-command-stderr>",
+  "<local-command-caveat>",
+];
+
+function isClaudeSyntheticMessage(text: string): boolean {
+  return CLAUDE_SYNTHETIC_MESSAGE_PREFIXES.some((prefix) =>
+    text.startsWith(prefix),
+  );
+}
+
 function extractClaudeMessageText(content: unknown): string | null {
   if (typeof content === "string") {
     const text = sanitizePromptText(content);
+    if (isClaudeSyntheticMessage(text)) return null;
     return text || null;
   }
   if (!Array.isArray(content)) return null;
@@ -90,6 +106,7 @@ function extractClaudeMessageText(content: unknown): string | null {
           ? typedItem.content
           : "";
     const cleaned = sanitizePromptText(text);
+    if (isClaudeSyntheticMessage(cleaned)) continue;
     if (cleaned) parts.push(cleaned);
   }
   return parts.length > 0 ? parts.join(" ") : null;
