@@ -115,6 +115,7 @@ export function HotkeyHints() {
       hints.push(
         "i Notes",
         "t Terminal",
+        "p Transcript",
         "o Open",
         "g Git",
         "l LazyGit",
@@ -134,6 +135,8 @@ export function HotkeyHints() {
         hints.push("Ctrl+] Send Esc");
       }
     }
+  } else if (view === "taskTranscript") {
+    hints.push("↑↓ Scroll", "PgUp/PgDn Page", "g/G Top/Bottom", "Esc Back");
   } else if (view === "taskLazygit") {
     hints.push("Esc Back", "Ctrl+] Send Esc");
   } else if (view === "standup") {

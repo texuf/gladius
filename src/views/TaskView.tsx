@@ -570,6 +570,12 @@ export function TaskView() {
       return;
     }
 
+    if (input === "p" && !key.super) {
+      setFocusPane("none");
+      setView("taskTranscript");
+      return;
+    }
+
     if (input === "o" && !key.super) {
       openOpenMenu();
       return;
@@ -975,7 +981,7 @@ export function TaskView() {
       "t Terminal",
       activeTask.model ? "c Console" : "c Console (choose model)",
     ],
-    ["o Open menu", "g Git menu", "l LazyGit"],
+    ["p Transcript", "o Open menu", "g Git menu", "l LazyGit"],
     ["r Refresh", "y Copy mode", "z Reset panes"],
     ["Esc Back", "x Close task"],
   ];
@@ -1062,7 +1068,7 @@ export function TaskView() {
         <Box gap={1}>
           <StatusDots {...allDots} />
           <Text dimColor color="yellow">
-            o: Open g: Git l: LazyGit c: Console
+            p: Transcript o: Open g: Git l: LazyGit c: Console
           </Text>
         </Box>
       </Box>

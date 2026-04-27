@@ -117,6 +117,7 @@ export type ViewState =
   | "tasks"
   | "taskView"
   | "taskLazygit"
+  | "taskTranscript"
   | "taskSwitcher"
   | "prComments"
   | "settings"

@@ -388,6 +388,29 @@ function resolveCodexSessionFile(task: Task): string | null {
   return null;
 }
 
+export function resolveTaskSessionFile(
+  task: Task,
+  source: PromptSource,
+  options: { preferExactSession?: boolean } = {},
+): string | null {
+  if (
+    options.preferExactSession &&
+    source === "claude" &&
+    task.worktree_path &&
+    task.claude_session_id
+  ) {
+    const projectDir = getClaudeProjectDir(task.worktree_path);
+    if (projectDir) {
+      const directPath = join(projectDir, `${task.claude_session_id}.jsonl`);
+      if (existsSync(directPath)) return directPath;
+    }
+  }
+
+  return source === "claude"
+    ? resolveClaudeSessionFile(task)
+    : resolveCodexSessionFile(task);
+}
+
 export function getLatestTaskPrompt(
   task: Task,
   source?: PromptSource,

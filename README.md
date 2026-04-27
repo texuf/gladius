@@ -76,6 +76,7 @@ bun --watch run src/index.tsx
 | `i`   | Edit notes                       |
 | `t`   | Focus terminal pane              |
 | `c`   | Focus console pane               |
+| `p`   | View current session transcript  |
 | `cl`  | Select Claude (first selection)  |
 | `co`  | Select Codex (first selection)   |
 | `l`   | Switch to Claude                 |

@@ -12,6 +12,7 @@ import { ProjectView } from "./views/ProjectView.js";
 import { TaskList } from "./views/TaskList.js";
 import { TaskView } from "./views/TaskView.js";
 import { TaskLazygit } from "./views/TaskLazygit.js";
+import { TaskTranscript } from "./views/TaskTranscript.js";
 import { TaskSwitcher } from "./views/TaskSwitcher.js";
 import { PrComments } from "./views/PrComments.js";
 import { Settings } from "./views/Settings.js";
@@ -65,6 +66,7 @@ export function App() {
             : "projects";
       case "taskView":
       case "taskLazygit":
+      case "taskTranscript":
       case "prComments":
       case "createPr":
         if (hasTask) return preferred;
@@ -243,6 +245,8 @@ export function App() {
         return <TaskView />;
       case "taskLazygit":
         return <TaskLazygit />;
+      case "taskTranscript":
+        return <TaskTranscript />;
       case "taskSwitcher":
         return <TaskSwitcher />;
       case "prComments":
