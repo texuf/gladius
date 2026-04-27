@@ -885,9 +885,21 @@ export function TaskView() {
       );
 
       await runGitCommand(repoPath, ["-C", repoPath, "add", "-A", "--"]);
-      await runGitCommand(repoPath, ["-C", repoPath, "commit", "-m", commitMsg]);
+      await runGitCommand(repoPath, [
+        "-C",
+        repoPath,
+        "commit",
+        "-m",
+        commitMsg,
+      ]);
       const [commitSha, branch] = await Promise.all([
-        runGitCommand(repoPath, ["-C", repoPath, "rev-parse", "--short", "HEAD"]),
+        runGitCommand(repoPath, [
+          "-C",
+          repoPath,
+          "rev-parse",
+          "--short",
+          "HEAD",
+        ]),
         runGitCommand(repoPath, [
           "-C",
           repoPath,
@@ -998,78 +1010,79 @@ export function TaskView() {
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={1}>
       {/* Header */}
-      <Box justifyContent="space-between" marginBottom={1}>
-        <Box>
-          <Text dimColor>
-            {activeRepo ? `${activeRepo.name}/` : `${activeTask.label}`}
-          </Text>
-          {copyMode && (
-            <Text bold color="yellow">
-              {" "}
-              COPY MODE
+      <Box justifyContent="space-between" marginBottom={1} width="100%">
+        <Box flexGrow={1} flexShrink={1} marginRight={1}>
+          <Text wrap="truncate-end">
+            <Text dimColor>
+              {activeRepo ? `${activeRepo.name}/` : `${activeTask.label}`}
             </Text>
-          )}
-          {fetching ? (
-            <Text dimColor> {busyLabel}...</Text>
-          ) : (
-            <>
-              {gitStatus && (
-                <>
-                  <Text color="cyan"> {gitStatus.branch}</Text>
-                  {(gitStatus.ahead > 0 ||
-                    gitStatus.behind > 0 ||
-                    gitStatus.tracksMain ||
-                    isEvenWithTracking) && (
-                    <Text color="cyan">
-                      {" ("}
-                      {isEvenWithTracking ? (
-                        <Text color="yellow">=</Text>
-                      ) : (
-                        <>
-                          <Text color="yellow">+{gitStatus.ahead}</Text>/
-                          {!gitStatus.tracksMain && (
-                            <Text color="yellow">-{gitStatus.behind}</Text>
-                          )}
-                          {gitStatus.tracksMain && <Text color="white">m</Text>}
-                        </>
-                      )}
-                      {")"}
-                    </Text>
-                  )}
-                  {gitStatus.behindMain > 0 && (
-                    <Text color="cyan"> [-{gitStatus.behindMain}]</Text>
-                  )}
-                  {gitStatus.changedFiles > 0 && (
-                    <Text color="yellow">
-                      {" "}
-                      {gitStatus.changedFiles} file
-                      {gitStatus.changedFiles !== 1 ? "s" : ""}
-                    </Text>
-                  )}
-                </>
-              )}
-              {gitStatus?.pr && (
-                <Text
-                  color={
-                    prTaskColor === "purple"
-                      ? "magenta"
-                      : prTaskColor === "none"
-                        ? "white"
-                        : prTaskColor
-                  }
-                >
-                  {" "}
-                  {formatPrStatus(gitStatus.pr)}
-                </Text>
-              )}
-            </>
-          )}
-        </Box>
-        <Box gap={1}>
-          <StatusDots {...allDots} />
-          <Text dimColor color="yellow">
-            p: Transcript o: Open g: Git l: LazyGit c: Console
+            {copyMode && (
+              <Text bold color="yellow">
+                {" "}
+                COPY MODE
+              </Text>
+            )}
+            {fetching ? (
+              <Text dimColor> {busyLabel}...</Text>
+            ) : (
+              <>
+                {gitStatus && (
+                  <>
+                    <Text color="cyan"> {gitStatus.branch}</Text>
+                    {(gitStatus.ahead > 0 ||
+                      gitStatus.behind > 0 ||
+                      gitStatus.tracksMain ||
+                      isEvenWithTracking) && (
+                      <Text color="cyan">
+                        {" ("}
+                        {isEvenWithTracking ? (
+                          <Text color="yellow">=</Text>
+                        ) : (
+                          <>
+                            <Text color="yellow">+{gitStatus.ahead}</Text>/
+                            {!gitStatus.tracksMain && (
+                              <Text color="yellow">-{gitStatus.behind}</Text>
+                            )}
+                            {gitStatus.tracksMain && (
+                              <Text color="white">m</Text>
+                            )}
+                          </>
+                        )}
+                        {")"}
+                      </Text>
+                    )}
+                    {gitStatus.behindMain > 0 && (
+                      <Text color="cyan"> [-{gitStatus.behindMain}]</Text>
+                    )}
+                    {gitStatus.changedFiles > 0 && (
+                      <Text color="yellow">
+                        {" "}
+                        {gitStatus.changedFiles} file
+                        {gitStatus.changedFiles !== 1 ? "s" : ""}
+                      </Text>
+                    )}
+                  </>
+                )}
+                {gitStatus?.pr && (
+                  <Text
+                    color={
+                      prTaskColor === "purple"
+                        ? "magenta"
+                        : prTaskColor === "none"
+                          ? "white"
+                          : prTaskColor
+                    }
+                  >
+                    {" "}
+                    {formatPrStatus(gitStatus.pr)}
+                  </Text>
+                )}
+              </>
+            )}
           </Text>
+        </Box>
+        <Box gap={1} flexShrink={0}>
+          <StatusDots {...allDots} />
         </Box>
       </Box>
 

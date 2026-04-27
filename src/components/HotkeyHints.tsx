@@ -163,12 +163,19 @@ export function HotkeyHints() {
       borderRight={false}
       paddingX={1}
       justifyContent="space-between"
+      width="100%"
     >
-      <Text dimColor>{hints.join("  ")}</Text>
-      {pty.max > 0 && (
-        <Text dimColor>
-          PTY {pty.used}/{pty.max}
+      <Box flexGrow={1} flexShrink={1} marginRight={1}>
+        <Text dimColor wrap="truncate-end">
+          {hints.join("  ")}
         </Text>
+      </Box>
+      {pty.max > 0 && (
+        <Box flexShrink={0}>
+          <Text dimColor>
+            PTY {pty.used}/{pty.max}
+          </Text>
+        </Box>
       )}
     </Box>
   );
