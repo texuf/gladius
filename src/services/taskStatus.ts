@@ -44,55 +44,59 @@ function getGitWorkStatus(gitStatus: GitStatus | null): GitWorkStatus {
   return (gitStatus?.changedFiles ?? 0) > 0 ? "dirty" : "clean";
 }
 
-function inferLlmWorkingFromPane(content: string): boolean {
-  const recentLines = content
+function getRecentPaneLines(content: string): string[] {
+  return content
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
     .slice(-20);
-  const recent = recentLines.join(" ").toLowerCase();
-
-  if (!recent) return false;
-  if (recentLines.some((line) => line.startsWith("❯"))) return false;
-
-  return (
-    recent.includes("esc to interrupt") ||
-    recentLines.some((line) => {
-      const normalized = line.toLowerCase();
-      return (
-        normalized.startsWith("✻ ") &&
-        (normalized.includes("…") || normalized.includes("..."))
-      );
-    }) ||
-    recent.includes("running…") ||
-    recent.includes("running...") ||
-    recent.includes("thinking") ||
-    recent.includes("processing")
-  );
 }
 
-function inferLlmNeedsInputFromPane(content: string): boolean {
-  const recent = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(-20)
-    .join(" ")
-    .toLowerCase();
+function findLastWorkingSignalIndex(recentLines: string[]): number {
+  for (let index = recentLines.length - 1; index >= 0; index -= 1) {
+    const normalized = recentLines[index].toLowerCase();
+    if (
+      normalized.includes("esc to interrupt") ||
+      normalized.includes("running…") ||
+      normalized.includes("running...") ||
+      normalized.includes("thinking") ||
+      normalized.includes("processing") ||
+      (normalized.startsWith("✻ ") &&
+        (normalized.includes("…") || normalized.includes("...")))
+    ) {
+      return index;
+    }
+  }
+  return -1;
+}
 
-  if (!recent) return false;
-  return (
-    recent.includes("do you want to proceed?") ||
-    (recent.includes("1. yes") && recent.includes("2. no")) ||
-    recent.includes("esc to cancel") ||
-    recent.includes("tab to amend") ||
-    recent.includes("ctrl+e to explain")
-  );
+function findLastNeedsInputSignalIndex(recentLines: string[]): number {
+  for (let index = recentLines.length - 1; index >= 0; index -= 1) {
+    const normalized = recentLines[index].toLowerCase();
+    if (
+      normalized.includes("do you want to proceed?") ||
+      normalized.includes("esc to cancel") ||
+      normalized.includes("tab to amend") ||
+      normalized.includes("ctrl+e to explain") ||
+      (normalized.includes("1. yes") && normalized.includes("2. no"))
+    ) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function inferLlmStatusFromPane(content: string): LlmActivityStatus {
-  if (inferLlmNeedsInputFromPane(content)) return "needsInput";
-  if (inferLlmWorkingFromPane(content)) return "working";
+  const recentLines = getRecentPaneLines(content);
+  if (recentLines.length === 0) return "idle";
+
+  const lastWorkingIndex = findLastWorkingSignalIndex(recentLines);
+  const lastNeedsInputIndex = findLastNeedsInputSignalIndex(recentLines);
+
+  // Explicit confirmations block until a newer working signal appears.
+  if (lastWorkingIndex > lastNeedsInputIndex) return "working";
+  if (lastNeedsInputIndex >= 0) return "needsInput";
+  if (lastWorkingIndex >= 0) return "working";
   return "idle";
 }
 
@@ -361,7 +365,17 @@ export async function refreshTaskStatus(
   }
 
   const llmStatus = await getLlmActivityStatus(task);
-  const gitStatus = gitStatusOverride ?? state.gitStatuses[task.id] ?? null;
+  let gitStatus = gitStatusOverride ?? state.gitStatuses[task.id] ?? null;
+  if (!gitStatus && task.worktree_path) {
+    try {
+      gitStatus = await getGitStatusWithPr(task.worktree_path, undefined);
+      useStore.setState((prev) => ({
+        gitStatuses: { ...prev.gitStatuses, [task.id]: gitStatus! },
+      }));
+    } catch {
+      gitStatus = null;
+    }
+  }
   const isConsoleFocused =
     state.focusPane === "console" && state.activeTask?.id === task.id;
 
