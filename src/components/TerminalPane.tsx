@@ -268,7 +268,10 @@ export function TerminalPane({
         backfill,
       );
     } else if (activeTask.model === "codex") {
-      captureCleanupRef.current = watchForCodexSessionId(onCapture);
+      captureCleanupRef.current = watchForCodexSessionId(
+        activeTask.worktree_path!,
+        onCapture,
+      );
     }
 
     return () => {

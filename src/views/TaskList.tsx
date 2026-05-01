@@ -20,6 +20,7 @@ import type { LinearIssue } from "../services/linear.js";
 import { generateLabel, deduplicateLabel } from "../utils/label.js";
 import { createWorktree } from "../services/worktree.js";
 import { deleteWorktree } from "../services/worktree.js";
+import { copyClaudeSessionToWorktree } from "../services/sessionCapture.js";
 import { BRANCH_PREFIX } from "../utils/constants.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { TextInputField } from "../components/TextInput.js";
@@ -586,6 +587,19 @@ export function TaskList() {
       const reopenedLabel = buildReopenLabel(task.label, existingLabels);
       const reopenedBranch = `${BRANCH_PREFIX}/${reopenedLabel}`;
       const worktreePath = await createWorktree(activeRepo, reopenedLabel);
+
+      // `claude --resume` only finds sessions in the project dir encoded from
+      // the current cwd; the new worktree has a different path, so the captured
+      // session must be copied across or the resume launches into "no session
+      // found" and exits.
+      if (task.claude_session_id && task.worktree_path) {
+        copyClaudeSessionToWorktree(
+          task.worktree_path,
+          worktreePath,
+          task.claude_session_id,
+        );
+      }
+
       dbReopenTask(task.id, worktreePath);
       dbUpdateTask(task.id, {
         label: reopenedLabel,
